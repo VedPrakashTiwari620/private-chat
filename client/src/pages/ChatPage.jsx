@@ -31,11 +31,12 @@ export default function ChatPage() {
   const [incomingData, setIncomingData] = useState(null);
   const [callType,     setCallType]     = useState(null);
   const [audioMuted,   setAudioMuted]   = useState(false);
-  const [videoOff,     setVideoOff]     = useState(false);
-  const [showCamera,   setShowCamera]   = useState(false);
-  const [facingMode,   setFacingMode]   = useState('environment');
-  const [callStatus,   setCallStatus]   = useState('ringing');
-  const [speakerOn,    setSpeakerOn]    = useState(false); // default: earpiece
+  const [videoOff,       setVideoOff]       = useState(false);
+  const [showCamera,     setShowCamera]     = useState(false);
+  const [facingMode,     setFacingMode]     = useState('environment');
+  const [callStatus,     setCallStatus]     = useState('ringing');
+  const [speakerOn,      setSpeakerOn]      = useState(false);
+  const [callCamFacing,  setCallCamFacing]  = useState('user'); // 'user'=front, 'environment'=rear
 
   /* ── REFS ── */
   const socketRef    = useRef(null);
@@ -83,7 +84,8 @@ export default function ChatPage() {
     activeRef.current = false;
     setShowCall(false);
     setShowIncoming(false);
-    setCallStatus('ringing'); // reset for next call
+    setCallStatus('ringing');
+    setCallCamFacing('user'); // reset to front cam for next call
     if (pcRef.current)   { pcRef.current.close(); pcRef.current = null; }
     if (localStream.current) { localStream.current.getTracks().forEach(t => t.stop()); localStream.current = null; }
     if (localVid.current)  localVid.current.srcObject  = null;
@@ -466,6 +468,37 @@ export default function ChatPage() {
     // iOS Safari: no API — show visual toggle only (system handles routing)
   }, [speakerOn]);
 
+  // ★ Camera flip: front ⇔ rear during active video call
+  const toggleCallCamera = useCallback(async () => {
+    if (callTypeRef.current !== 'video') return;
+    const newFacing = callCamFacing === 'user' ? 'environment' : 'user';
+    try {
+      // Get new video-only stream with opposite camera
+      const newStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: newFacing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
+        audio: false
+      });
+      const newTrack = newStream.getVideoTracks()[0];
+      if (!newTrack) return;
+
+      // Hot-swap track in PeerConnection (no call restart needed)
+      if (pcRef.current) {
+        const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'video');
+        if (sender) await sender.replaceTrack(newTrack);
+      }
+
+      // Replace in localStream and update preview
+      if (localStream.current) {
+        localStream.current.getVideoTracks().forEach(t => { t.stop(); localStream.current.removeTrack(t); });
+        localStream.current.addTrack(newTrack);
+        if (localVid.current) localVid.current.srcObject = localStream.current;
+      }
+      setCallCamFacing(newFacing);
+    } catch (e) {
+      alert('Camera switch failed: ' + e.message);
+    }
+  }, [callCamFacing]);
+
   const endCallClick = () => {
     if (!activeRef.current && callerRef.current) {
       // Call hasn't connected yet — cancel it
@@ -697,9 +730,15 @@ export default function ChatPage() {
                 <button onClick={toggleMute}    title={audioMuted?'Unmute':'Mute'}   style={{ background: audioMuted  ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}><i className={`fas fa-microphone${audioMuted?'-slash':''}`} /></button>
                 {callType==='video' && <button onClick={toggleVideo}  title={videoOff?'Cam On':'Cam Off'} style={{ background: videoOff    ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}><i className={`fas fa-video${videoOff?'-slash':''}`} /></button>}
                 {/* ★ Speaker toggle button */}
-                <button onClick={toggleSpeaker} title={speakerOn?'Earpiece':'Speaker'} style={{ background: speakerOn   ? 'rgba(33,150,243,0.85)' : 'rgba(255,255,255,0.2)' }}>
+                <button onClick={toggleSpeaker}     title={speakerOn?'Earpiece':'Loudspeaker'} style={{ background: speakerOn      ? 'rgba(33,150,243,0.85)' : 'rgba(255,255,255,0.2)' }}>
                   <i className={`fas fa-volume-${speakerOn ? 'up' : 'off'}`} />
                 </button>
+                {/* ★ Camera flip: front ⇔ rear */}
+                {callType === 'video' && (
+                  <button onClick={toggleCallCamera} title={callCamFacing==='user'?'Rear Camera':'Front Camera'} style={{ background:'rgba(255,255,255,0.2)' }}>
+                    <i className="fas fa-sync-alt" />
+                  </button>
+                )}
                 <button id="end-call" className="danger" onClick={endCallClick}><i className="fas fa-phone-slash" /></button>
               </div>
             )}
