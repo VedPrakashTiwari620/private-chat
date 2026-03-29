@@ -364,14 +364,14 @@ export default function ChatPage() {
       const img = new Image();
       img.onload = async () => {
         const c = document.createElement('canvas');
-        // ★ Higher resolution: 1200px max, 0.88 JPEG quality
-        const MAX = 1200;
+        // ★ 4K max: 3840px wide, 0.95 quality (near-lossless)
+        const MAX = 3840;
         let [w, h] = [img.width, img.height];
         if (w > h && w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
         else if (h > MAX)     { w = Math.round(w * MAX / h); h = MAX; }
         c.width = w; c.height = h;
         c.getContext('2d').drawImage(img, 0, 0, w, h);
-        await sendImage(c.toDataURL('image/jpeg', 0.88));
+        await sendImage(c.toDataURL('image/jpeg', 0.95));
       };
       img.src = e.target.result;
     };
@@ -392,7 +392,14 @@ export default function ChatPage() {
     setShowCamera(true);
     try {
       if (camStream.current) camStream.current.getTracks().forEach(t => t.stop());
-      camStream.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode } });
+      // ★ Request 4K from camera
+      camStream.current = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode,
+          width:  { ideal: 3840 },
+          height: { ideal: 2160 },
+        }
+      });
       if (camPreview.current) camPreview.current.srcObject = camStream.current;
     } catch { setShowCamera(false); alert('Camera access denied.'); }
   };
@@ -408,7 +415,10 @@ export default function ChatPage() {
     camStream.current?.getTracks().forEach(t => t.stop());
     setTimeout(async () => {
       try {
-        camStream.current = await navigator.mediaDevices.getUserMedia({ video: { facingMode: next } });
+        // ★ 4K for switched camera too
+        camStream.current = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: next, width: { ideal: 3840 }, height: { ideal: 2160 } }
+        });
         if (camPreview.current) camPreview.current.srcObject = camStream.current;
       } catch {}
     }, 100);
@@ -417,11 +427,13 @@ export default function ChatPage() {
   const takePhoto = () => {
     if (!camStream.current || !camPreview.current) return;
     const canvas = camCanvas.current;
-    canvas.width  = camPreview.current.videoWidth  || 640;
-    canvas.height = camPreview.current.videoHeight || 480;
+    // ★ Use actual native video resolution (4K if camera supports it)
+    canvas.width  = camPreview.current.videoWidth;
+    canvas.height = camPreview.current.videoHeight;
     canvas.getContext('2d').drawImage(camPreview.current, 0, 0);
     closeCamera();
-    sendImage(canvas.toDataURL('image/jpeg', 0.6));
+    // ★ 0.97 quality = near-lossless JPEG
+    sendImage(canvas.toDataURL('image/jpeg', 0.97));
   };
 
   /* ── CALLS ── */
