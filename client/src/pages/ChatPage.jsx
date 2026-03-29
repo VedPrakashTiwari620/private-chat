@@ -96,19 +96,18 @@ export default function ChatPage() {
   const getMedia = async type => {
     try {
       localStream.current = await navigator.mediaDevices.getUserMedia({
-        // ★ HD audio with noise/echo suppression
+        // HD audio with noise/echo suppression
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl:  true,
           sampleRate:       48000,
         },
-        // ★ HD video 720p
+        // ★ No fixed 1280x720 — avoids zoom/crop on mobile portrait
+        //   Let browser pick native resolution
         video: type === 'video' ? {
           facingMode: 'user',
-          width:      { ideal: 1280 },
-          height:     { ideal: 720  },
-          frameRate:  { ideal: 30   },
+          aspectRatio: { ideal: 9/16 },
         } : false
       });
     } catch (e) {
