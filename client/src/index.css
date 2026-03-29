@@ -1,0 +1,217 @@
+* { box-sizing:border-box; margin:0; padding:0; font-family:'Inter','Segoe UI',Tahoma,Geneva,Verdana,sans-serif; }
+
+body { background:url('/bg.png') center/cover no-repeat fixed; height:100vh; display:flex; justify-content:center; align-items:center; color:#fff; }
+
+.container { width:100%; height:100vh; }
+
+/* ── Login ── */
+#login-container { display:flex; justify-content:center; align-items:center; background:#f4f7f6; position:fixed; top:0; left:0; }
+
+.login-box { background:rgba(20,20,30,0.5); backdrop-filter:blur(25px); -webkit-backdrop-filter:blur(25px); padding:40px; border-radius:20px; border:1px solid rgba(255,255,255,0.2); box-shadow:0 15px 40px rgba(0,0,0,0.4); width:380px; text-align:center; }
+
+.input-group { margin-bottom:20px; }
+.input-group input { width:100%; padding:14px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); border-radius:12px; font-size:15px; color:#fff; outline:none; transition:all 0.3s ease; }
+.input-group input::placeholder { color:rgba(255,255,255,0.6); }
+.input-group input:focus { border-color:#ff5e98; background:rgba(255,255,255,0.15); }
+
+button { background:linear-gradient(135deg,#ff5e98 0%,#ff8c42 100%); color:white; border:none; padding:14px 20px; border-radius:12px; cursor:pointer; font-weight:bold; font-size:16px; transition:transform 0.2s,background 0.2s; }
+button:hover { transform:translateY(-2px); box-shadow:0 5px 15px rgba(255,94,152,0.4); }
+
+/* ── App ── */
+#app-container { display:flex; width:90%; max-width:1400px; height:85vh; margin:0 auto; border-radius:20px; overflow:hidden; background:rgba(10,10,20,0.5); backdrop-filter:blur(25px); -webkit-backdrop-filter:blur(25px); border:1px solid rgba(255,255,255,0.1); box-shadow:0 20px 50px rgba(0,0,0,0.5); }
+
+/* ── Sidebar ── */
+.sidebar { width:320px; background:rgba(0,0,0,0.2); border-right:1px solid rgba(255,255,255,0.05); display:flex; flex-direction:column; }
+.header { background:rgba(0,0,0,0.3); padding:15px 20px; display:flex; justify-content:space-between; align-items:center; height:70px; border-bottom:1px solid rgba(255,255,255,0.05); }
+.user-info { font-weight:600; color:#fff; font-size:14px; }
+.header button { background:transparent; color:#fff; padding:8px; border-radius:50%; font-size:18px; box-shadow:none; }
+.header button:hover { color:#ff5e98; background:rgba(255,255,255,0.1); transform:none; }
+.contact-list { flex:1; overflow-y:auto; }
+.contact { padding:15px 20px; border-bottom:1px solid rgba(255,255,255,0.02); cursor:pointer; display:flex; align-items:center; gap:15px; transition:background 0.3s; }
+.contact:hover { background:rgba(255,255,255,0.05); }
+.contact.active { background:rgba(255,255,255,0.1); border-left:4px solid #ff5e98; }
+.contact-avatar,.contact-avatar-small { width:50px; height:50px; border-radius:50%; background:rgba(255,255,255,0.2); display:flex; align-items:center; justify-content:center; color:#fff; font-size:24px; border:2px solid rgba(255,255,255,0.3); overflow:hidden; }
+.contact-avatar-small { width:44px; height:44px; }
+.contact-details { flex:1; }
+.contact-name { font-size:16px; color:#fff; font-weight:600; margin-bottom:4px; }
+.contact-status { font-size:13px; color:rgba(255,255,255,0.6); }
+
+/* ── Main Chat ── */
+.main-chat { flex:1; display:flex; flex-direction:column; background:transparent; }
+.chat-header { background:rgba(0,0,0,0.2); padding:15px 25px; display:flex; justify-content:space-between; align-items:center; height:70px; border-bottom:1px solid rgba(255,255,255,0.05); }
+.contact-info { display:flex; align-items:center; gap:15px; }
+.contact-info h2 { font-size:18px; font-weight:600; color:#fff; }
+.call-actions button { background:transparent; color:#fff; font-size:20px; padding:10px; margin-left:10px; border-radius:50%; box-shadow:none; }
+.call-actions button:hover { color:#ff8c42; background:rgba(255,255,255,0.1); transform:none; }
+
+/* ── Chat partner status in header ── */
+.chat-partner-status-text { font-size:12px; color:rgba(255,255,255,0.55); margin-top:2px; transition:color 0.4s; display:flex; align-items:center; gap:5px; }
+.chat-partner-status-text.is-online { color:#00e676; }
+.status-dot { width:7px; height:7px; border-radius:50%; background:#00e676; display:inline-block; box-shadow:0 0 6px #00e676; animation:pulse-dot 2s infinite; }
+@keyframes pulse-dot { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(1.3);opacity:0.7} }
+
+/* ── Messages ── */
+.chat-messages { flex:1; padding:8px 12px; overflow-y:auto; display:flex; flex-direction:column; gap:2px; }
+
+.message {
+  max-width: 72%;
+  width: fit-content;
+  padding: 4px 7px 3px;
+  border-radius: 7px;
+  font-size: 13.5px;
+  line-height: 1.4;
+  position: relative;
+  box-shadow: 0 1px 1px rgba(0,0,0,0.13);
+  margin-bottom: 1px;
+}
+
+/* ── Sent (green, right side) ── */
+.message.sent {
+  background: #d9fdd3;
+  align-self: flex-end;
+  border-bottom-right-radius: 2px;
+  color: #111;
+}
+.message.sent::after {
+  content: '';
+  position: absolute;
+  right: -8px;
+  bottom: 0;
+  width: 0; height: 0;
+  border: 8px solid transparent;
+  border-left: 8px solid #d9fdd3;
+  border-bottom: 0;
+  border-right: 0;
+}
+
+/* ── Received (white, left side) ── */
+.message.received {
+  background: #ffffff;
+  align-self: flex-start;
+  border-bottom-left-radius: 2px;
+  color: #111;
+}
+.message.received::after {
+  content: '';
+  position: absolute;
+  left: -8px;
+  bottom: 0;
+  width: 0; height: 0;
+  border: 8px solid transparent;
+  border-right: 8px solid #ffffff;
+  border-bottom: 0;
+  border-left: 0;
+}
+
+/* ── Message body (float container) ── */
+.msg-body { overflow: hidden; }
+
+/* ── Message footer — floats RIGHT so time sits inline with text ── */
+.msg-footer {
+  float: right;
+  margin: 0 -1px -2px 5px;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  position: relative;
+  bottom: -1px;
+  line-height: 1;
+}
+.msg-time  { font-size:10px; white-space:nowrap; }
+.message.sent     .msg-time { color:rgba(0,0,0,0.45); }
+.message.received .msg-time { color:rgba(0,0,0,0.45); }
+
+/* ── WhatsApp Ticks ── */
+.msg-tick     { font-size:11px; flex-shrink:0; }
+.tick-sending { color:rgba(0,0,0,0.25); }
+.tick-sent    { color:rgba(0,0,0,0.42); }
+.tick-seen    { color:#34b7f1; }
+
+
+
+
+
+
+/* ── System event messages ── */
+.system-event-msg { margin:10px auto; padding:6px 15px; background:rgba(255,105,180,0.15); border-radius:20px; font-size:12px; color:#ffb6c1; text-align:center; width:fit-content; display:flex; align-items:center; gap:8px; box-shadow:0 2px 5px rgba(0,0,0,0.2); }
+
+/* ── Online dot on avatars ── */
+.online-dot-sidebar { position:absolute; bottom:1px; right:1px; width:12px; height:12px; border-radius:50%; background:#00e676; border:2px solid rgba(10,10,20,0.8); box-shadow:0 0 6px #00e676; animation:pulse-dot 2s infinite; }
+.online-dot-header  { position:absolute; bottom:0;   right:0;   width:10px; height:10px; border-radius:50%; background:#00e676; border:2px solid rgba(0,0,0,0.5); box-shadow:0 0 5px #00e676; animation:pulse-dot 2s infinite; }
+
+
+/* ── Input Area ── */
+.chat-input-area { background:rgba(0,0,0,0.3); padding:15px 25px; display:flex; align-items:center; gap:15px; border-top:1px solid rgba(255,255,255,0.05); }
+.chat-input-area input { flex:1; padding:16px 20px; border:none; border-radius:25px; outline:none; font-size:15px; background:rgba(255,255,255,0.1); color:#fff; border:1px solid rgba(255,255,255,0.1); }
+.chat-input-area input::placeholder { color:rgba(255,255,255,0.5); }
+.chat-input-area input:focus { background:rgba(255,255,255,0.15); border-color:rgba(255,255,255,0.3); }
+.chat-input-area button { background:linear-gradient(135deg,#ff5e98 0%,#ff8c42 100%); color:white; font-size:18px; width:50px; height:50px; border-radius:50%; display:flex; justify-content:center; align-items:center; padding:0; }
+
+/* ── Modals ── */
+.modal { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.85); backdrop-filter:blur(15px); z-index:100; display:flex; justify-content:center; align-items:center; }
+.video-container { position:relative; width:85%; max-width:1100px; height:85%; background:#000; border-radius:20px; overflow:hidden; box-shadow:0 20px 60px rgba(0,0,0,0.6); text-align:center; border:1px solid rgba(255,255,255,0.1); }
+#remote-video { width:100%; height:100%; object-fit:cover; }
+#local-video  { position:absolute; bottom:30px; right:30px; width:250px; height:180px; background:#111; border:3px solid rgba(255,255,255,0.3); border-radius:16px; object-fit:cover; }
+.call-controls { position:absolute; bottom:40px; left:50%; transform:translateX(-50%); display:flex; gap:25px; background:rgba(0,0,0,0.5); padding:15px 30px; border-radius:50px; backdrop-filter:blur(10px); border:1px solid rgba(255,255,255,0.2); }
+.call-controls button { width:55px; height:55px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:20px; padding:0; background:rgba(255,255,255,0.2); box-shadow:none; }
+.danger  { background:linear-gradient(135deg,#ff416c 0%,#ff4b2b 100%) !important; }
+.success { background:linear-gradient(135deg,#11998e 0%,#38ef7d 100%) !important; }
+.alert-box { position:fixed; top:40px; left:50%; transform:translateX(-50%); background:rgba(25,25,35,0.85); backdrop-filter:blur(20px); padding:25px 40px; border-radius:20px; box-shadow:0 15px 40px rgba(0,0,0,0.4); z-index:200; text-align:center; border:1px solid rgba(255,255,255,0.1); animation:slideDown 0.4s cubic-bezier(0.175,0.885,0.32,1.275); }
+@keyframes slideDown { from{top:-150px;opacity:0} to{top:40px;opacity:1} }
+.alert-box p { margin-bottom:25px; font-size:20px; font-weight:600; color:#fff; display:flex; align-items:center; justify-content:center; gap:10px; }
+.alert-actions { display:flex; gap:20px; justify-content:center; }
+.alert-actions button { display:flex; align-items:center; gap:10px; padding:12px 25px; font-size:16px; box-shadow:none; }
+
+/* ── User Select Screen ── */
+#user-select-container { background:transparent; }
+.user-select-box { background:rgba(10,10,20,0.6); backdrop-filter:blur(30px); -webkit-backdrop-filter:blur(30px); border:1px solid rgba(255,255,255,0.15); border-radius:28px; padding:50px 60px; text-align:center; box-shadow:0 25px 60px rgba(0,0,0,0.5); animation:fadeInUp 0.5s cubic-bezier(0.175,0.885,0.32,1.275); }
+@keyframes fadeInUp { from{opacity:0;transform:translateY(30px) scale(0.95)} to{opacity:1;transform:translateY(0) scale(1)} }
+.user-select-logo { font-size:52px; margin-bottom:18px; background:linear-gradient(135deg,#ff5e98,#ff8c42); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+.user-select-title { font-size:32px; font-weight:700; color:#fff; letter-spacing:-0.5px; margin-bottom:8px; }
+.user-select-sub { font-size:15px; color:rgba(255,255,255,0.5); margin-bottom:45px; }
+.user-cards { display:flex; gap:30px; justify-content:center; }
+.user-card { cursor:pointer; padding:30px 30px 22px; border-radius:22px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); width:180px; transition:transform 0.3s,background 0.3s,box-shadow 0.3s; position:relative; overflow:hidden; }
+.user-card:hover { transform:translateY(-8px) scale(1.03); background:rgba(255,255,255,0.12); box-shadow:0 20px 45px rgba(0,0,0,0.4); }
+.user-card-avatar { width:100px; height:100px; border-radius:50%; margin:0 auto 18px; position:relative; }
+.user-card-avatar img { width:100%; height:100%; border-radius:50%; object-fit:cover; border:3px solid rgba(255,255,255,0.25); position:relative; z-index:1; }
+.user-card:hover .user-card-avatar img { border-color:rgba(255,255,255,0.5); }
+.user-card-glow { position:absolute; width:100%; height:100%; border-radius:50%; top:0; left:0; opacity:0; transition:opacity 0.3s; z-index:0; }
+.user-card:hover .user-card-glow { opacity:1; }
+.glow-pink { box-shadow:0 0 35px 10px rgba(255,94,152,0.55); background:radial-gradient(circle,rgba(255,94,152,0.3) 0%,transparent 70%); }
+.glow-blue { box-shadow:0 0 35px 10px rgba(79,172,254,0.55); background:radial-gradient(circle,rgba(79,172,254,0.3) 0%,transparent 70%); }
+.user-card-name { font-size:20px; font-weight:700; color:#fff; margin-bottom:6px; }
+.user-card-hint { font-size:12px; color:rgba(255,255,255,0.45); }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width:8px; }
+::-webkit-scrollbar-track { background:transparent; }
+::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.2); border-radius:4px; }
+::-webkit-scrollbar-thumb:hover { background:rgba(255,255,255,0.4); }
+
+/* ── Mobile ── */
+@media (max-width:768px) {
+  body { overflow:hidden; height:100dvh; }
+  #app-container { flex-direction:column; width:100%; height:100dvh; border-radius:0; margin:0; border:none; box-shadow:none; }
+  * { -webkit-tap-highlight-color:transparent; }
+  .sidebar { width:100%; border-right:none; flex-shrink:0; }
+  .contact-list { display:none; }
+  .header { height:50px; padding:5px 15px; background:rgba(0,0,0,0.4); border-bottom:none; }
+  .chat-header { height:60px; padding:5px 15px; background:rgba(0,0,0,0.15); flex-shrink:0; }
+  .main-chat { width:100%; flex:1; overflow:hidden; }
+  .chat-messages { padding:10px; -webkit-overflow-scrolling:touch; }
+  .chat-input-area { padding:8px 10px; padding-bottom:calc(8px + env(safe-area-inset-bottom)); gap:6px; background:rgba(0,0,0,0.4); flex-shrink:0; }
+  .chat-input-area input { font-size:16px; padding:10px 15px; border-radius:20px; }
+  .chat-input-area button { width:42px; height:42px; font-size:16px; flex-shrink:0; }
+  .call-actions button { font-size:16px; padding:8px; margin-left:2px; }
+  .contact-avatar-small { width:35px; height:35px; }
+  .contact-info h2 { font-size:15px; }
+  .message { max-width:85%; font-size:15px; padding:10px 14px; border-radius:14px; }
+  #local-video { width:100px; height:140px; bottom:90px; right:15px; border-width:2px; }
+  .call-controls { bottom:20px; padding:10px 20px; gap:15px; }
+  .call-controls button { width:45px; height:45px; font-size:16px; }
+  .user-select-box { padding:40px 25px; width:90%; border-radius:22px; }
+  .user-cards { gap:16px; }
+  .user-card { width:140px; padding:22px 15px 18px; }
+  .user-card-avatar { width:80px; height:80px; }
+  .user-select-title { font-size:26px; }
+}
