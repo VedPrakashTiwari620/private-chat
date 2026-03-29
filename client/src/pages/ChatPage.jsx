@@ -104,10 +104,12 @@ export default function ChatPage() {
           sampleRate:       48000,
         },
         // ★ No fixed 1280x720 — avoids zoom/crop on mobile portrait
-        //   Let browser pick native resolution
+        // ★ Full HD+ — safe now because CSS uses object-fit:contain (no zoom/crop)
         video: type === 'video' ? {
           facingMode: 'user',
-          aspectRatio: { ideal: 9/16 },
+          width:     { ideal: 1920, max: 3840 }, // 1080p ideal, 4K max
+          height:    { ideal: 1080, max: 2160 },
+          frameRate: { ideal: 30,   max: 60   },
         } : false
       });
     } catch (e) {
@@ -132,7 +134,24 @@ export default function ChatPage() {
       localStream.current.getTracks().forEach(t => pc.addTrack(t, localStream.current));
     pc.ontrack        = e  => { if (remoteVid.current) remoteVid.current.srcObject = e.streams[0]; };
     pc.onicecandidate = e  => { if (e.candidate) socketRef.current?.emit('ice-candidate', e.candidate); };
-    pc.onconnectionstatechange = () => console.log('WebRTC state:', pc.connectionState);
+    // ★ Boost bitrate to Full HD+ once ICE connection is established
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        pc.getSenders().forEach(async sender => {
+          try {
+            const params = sender.getParameters();
+            if (!params.encodings?.length) params.encodings = [{}];
+            if (sender.track?.kind === 'video') {
+              params.encodings[0].maxBitrate   = 8_000_000;  // ★ 8 Mbps video
+              params.encodings[0].maxFramerate = 60;
+            } else if (sender.track?.kind === 'audio') {
+              params.encodings[0].maxBitrate   = 256_000;    // ★ 256 kbps audio
+            }
+            await sender.setParameters(params);
+          } catch (e) { /* setParameters may be unsupported on some browsers */ }
+        });
+      }
+    };
     pcRef.current = pc;
     return pc;
   }, []);
