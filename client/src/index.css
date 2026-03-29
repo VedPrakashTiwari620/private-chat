@@ -214,10 +214,11 @@ button:hover { transform:translateY(-2px); box-shadow:0 5px 15px rgba(255,94,152
     width:100% !important;
     height:100% !important;
     max-width:100% !important;
-    border-radius:0 !important;   /* edge-to-edge */
+    border-radius:0 !important;
     border:none !important;
   }
-  #remote-video  { object-fit:contain; }  /* show FULL camera view, no crop */
+  /* 720p is 16:9 landscape — cover fills screen without black bars */
+  #remote-video  { object-fit:cover; }
   #local-video   { width:90px; height:125px; bottom:95px; right:12px; border-width:2px; }
   .call-controls { bottom:15px; padding:10px 16px; gap:12px; }
   .call-controls button { width:46px; height:46px; font-size:16px; }

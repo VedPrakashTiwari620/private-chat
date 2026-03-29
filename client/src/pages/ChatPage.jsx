@@ -104,12 +104,12 @@ export default function ChatPage() {
           sampleRate:       48000,
         },
         // ★ No fixed 1280x720 — avoids zoom/crop on mobile portrait
-        // ★ Full HD+ — safe now because CSS uses object-fit:contain (no zoom/crop)
+        // ★ 720p landscape — reliable on all phones, no portrait issue
         video: type === 'video' ? {
           facingMode: 'user',
-          width:     { ideal: 1920, max: 3840 }, // 1080p ideal, 4K max
-          height:    { ideal: 1080, max: 2160 },
-          frameRate: { ideal: 30,   max: 60   },
+          width:     { ideal: 1280 },
+          height:    { ideal: 720  },
+          frameRate: { ideal: 30   },
         } : false
       });
     } catch (e) {
@@ -364,14 +364,14 @@ export default function ChatPage() {
       const img = new Image();
       img.onload = async () => {
         const c = document.createElement('canvas');
-        // ★ 4K max: 3840px wide, 0.95 quality (near-lossless)
-        const MAX = 3840;
+        // HD: 2048px max, 0.92 quality — great quality, manageable size
+        const MAX = 2048;
         let [w, h] = [img.width, img.height];
         if (w > h && w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
         else if (h > MAX)     { w = Math.round(w * MAX / h); h = MAX; }
         c.width = w; c.height = h;
         c.getContext('2d').drawImage(img, 0, 0, w, h);
-        await sendImage(c.toDataURL('image/jpeg', 0.95));
+        await sendImage(c.toDataURL('image/jpeg', 0.92));
       };
       img.src = e.target.result;
     };
@@ -392,12 +392,12 @@ export default function ChatPage() {
     setShowCamera(true);
     try {
       if (camStream.current) camStream.current.getTracks().forEach(t => t.stop());
-      // ★ Request 4K from camera
+      // ★ 1080p — works on all phones (back & front), 4K caused failures
       camStream.current = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode,
-          width:  { ideal: 3840 },
-          height: { ideal: 2160 },
+          width:  { ideal: 1920 },
+          height: { ideal: 1080 },
         }
       });
       if (camPreview.current) camPreview.current.srcObject = camStream.current;
@@ -415,9 +415,9 @@ export default function ChatPage() {
     camStream.current?.getTracks().forEach(t => t.stop());
     setTimeout(async () => {
       try {
-        // ★ 4K for switched camera too
+        // ★ 1080p for both cameras
         camStream.current = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: next, width: { ideal: 3840 }, height: { ideal: 2160 } }
+          video: { facingMode: next, width: { ideal: 1920 }, height: { ideal: 1080 } }
         });
         if (camPreview.current) camPreview.current.srcObject = camStream.current;
       } catch {}
@@ -427,13 +427,13 @@ export default function ChatPage() {
   const takePhoto = () => {
     if (!camStream.current || !camPreview.current) return;
     const canvas = camCanvas.current;
-    // ★ Use actual native video resolution (4K if camera supports it)
+    // Use native video resolution from stream (up to 1080p)
     canvas.width  = camPreview.current.videoWidth;
     canvas.height = camPreview.current.videoHeight;
     canvas.getContext('2d').drawImage(camPreview.current, 0, 0);
     closeCamera();
-    // ★ 0.97 quality = near-lossless JPEG
-    sendImage(canvas.toDataURL('image/jpeg', 0.97));
+    // 0.95 quality = excellent JPEG
+    sendImage(canvas.toDataURL('image/jpeg', 0.95));
   };
 
   /* ── CALLS ── */
