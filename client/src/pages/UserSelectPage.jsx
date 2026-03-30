@@ -16,7 +16,7 @@ export default function UserSelectPage() {
         <div className="user-cards">
           <div className="user-card" id="select-user1" onClick={() => select('user1')}>
             <div className="user-card-avatar">
-              <img src="/avatar2.png" alt="Her" />
+              <i className="fas fa-user-circle" style={{fontSize: '98px', color: '#e9edef'}}></i>
               <div className="user-card-glow glow-pink" />
             </div>
             <div className="user-card-name">💖 Her</div>
@@ -24,7 +24,7 @@ export default function UserSelectPage() {
           </div>
           <div className="user-card" id="select-user2" onClick={() => select('user2')}>
             <div className="user-card-avatar">
-              <img src="/avatar1.png" alt="Him" />
+              <i className="fas fa-user-circle" style={{fontSize: '98px', color: '#e9edef'}}></i>
               <div className="user-card-glow glow-blue" />
             </div>
             <div className="user-card-name">💙 Him</div>

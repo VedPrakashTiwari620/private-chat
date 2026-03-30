@@ -628,7 +628,7 @@ export default function ChatPage() {
         <div className="header">
           <div className="user-info" style={{ display:'flex', alignItems:'center', gap:'10px' }}>
             <div style={{ width:40, height:40, borderRadius:'50%', overflow:'hidden', border:'2px solid rgba(255,255,255,0.3)', flexShrink:0 }}>
-              <img src={myAvatar} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="me" />
+              <i className="fas fa-user-circle" style={{fontSize: '40px', color: '#e9edef'}}></i>
             </div>
             <div>
               <div id="current-user-email">My Love ❤️</div>
@@ -643,7 +643,7 @@ export default function ChatPage() {
           <div className="contact active">
             <div style={{ position:'relative', flexShrink:0 }}>
               <div className="contact-avatar">
-                <img src={partnerAvatar} style={{ width:'100%', height:'100%', borderRadius:'50%', objectFit:'cover' }} alt="partner" />
+                <i className="fas fa-user-circle" style={{fontSize: '44px', color: '#e9edef'}}></i>
               </div>
               {pOnline && <span className="online-dot-sidebar" />}
             </div>
@@ -664,7 +664,7 @@ export default function ChatPage() {
           <div className="contact-info">
             <div style={{ position:'relative', flexShrink:0 }}>
               <div className="contact-avatar-small" style={{ overflow:'hidden' }}>
-                <img src={partnerAvatar} style={{ width:'100%', height:'100%', borderRadius:'50%', objectFit:'cover' }} alt="partner" />
+                <i className="fas fa-user-circle" style={{fontSize: '36px', color: '#e9edef'}}></i>
               </div>
               {pOnline && <span className="online-dot-header" />}
             </div>
@@ -707,7 +707,7 @@ export default function ChatPage() {
             {(callStatus === 'ringing' || callStatus === 'not_answered' || callStatus === 'declined') && (
               <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,0.82)', gap:14, zIndex:10 }}>
                 <div style={{ width:90, height:90, borderRadius:'50%', overflow:'hidden', border:'3px solid rgba(255,255,255,0.35)', boxShadow:'0 0 20px rgba(255,255,255,0.1)' }}>
-                  <img src={partnerAvatar} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="" />
+                  <i className="fas fa-user-circle" style={{fontSize: '80px', color: '#e9edef'}}></i>
                 </div>
                 <p style={{ color:'white', fontSize:17, fontWeight:600, margin:0 }}>My Forever ❤️</p>
 
