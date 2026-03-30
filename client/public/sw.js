@@ -1,15 +1,18 @@
-self.addEventListener('install', (e) => {
+self.addEventListener('install', () => {
   self.skipWaiting();
 });
 
 self.addEventListener('activate', (e) => {
-  return self.clients.claim();
+  e.waitUntil(
+    caches.keys().then((keyList) => {
+      return Promise.all(keyList.map((key) => caches.delete(key)));
+    }).then(() => {
+      return self.clients.claim();
+    })
+  );
 });
 
 self.addEventListener('fetch', (e) => {
-  // A minimal fetch handler is required by Chrome to show the PWA install prompt.
-  // We just let the request pass through.
-  e.respondWith(fetch(e.request).catch(err => {
-    return new Response("App is running offline", { status: 503, statusText: "Service Unavailable" });
-  }));
+  // Always fetch from network to ignore ANY cache. No offline support for now, but guarantees fresh code!
+  e.respondWith(fetch(e.request));
 });

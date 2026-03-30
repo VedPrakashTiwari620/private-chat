@@ -131,7 +131,29 @@ export default function ChatPage() {
     const pc = new RTCPeerConnection(ICE);
     if (localStream.current)
       localStream.current.getTracks().forEach(t => pc.addTrack(t, localStream.current));
-    pc.ontrack        = e  => { if (remoteVid.current) remoteVid.current.srcObject = e.streams[0]; };
+    pc.ontrack = async e => {
+      if (remoteVid.current) {
+        remoteVid.current.srcObject = e.streams[0];
+        // ★ FORCE EARPIECE (front speaker) on Android seamlessly upon connection
+        try {
+          if ('setSinkId' in remoteVid.current) {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const outputs = devices.filter(d => d.kind === 'audiooutput');
+            // Look for earpiece in device labels
+            const earpiece = outputs.find(d =>
+              d.label.toLowerCase().includes('earpiece') ||
+              d.label.toLowerCase().includes('phone')
+            );
+            if (earpiece) {
+              await remoteVid.current.setSinkId(earpiece.deviceId);
+            } else if (outputs.length > 0) {
+              // Fallback to exactly 'default' sink (which is usually earpiece for audio calls)
+              await remoteVid.current.setSinkId('default');
+            }
+          }
+        } catch (err) { console.warn('Force Earpiece failed:', err); }
+      }
+    };
     pc.onicecandidate = e  => { if (e.candidate) socketRef.current?.emit('ice-candidate', e.candidate); };
     // ★ Boost bitrate to Full HD+ once ICE connection is established
     pc.oniceconnectionstatechange = () => {

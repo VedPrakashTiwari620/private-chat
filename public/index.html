@@ -6,13 +6,27 @@
   <meta name="viewport"
     content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Global Capital Bank</title>
+  
+  <!-- PWA Setup -->
+  <link rel="manifest" href="/manifest.json" />
+  <meta name="theme-color" content="#0f0f13" />
+  <link rel="icon" href="/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+
   <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/index-C4D2Iv7L.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-DADaD8a-.css">
+  <script type="module" crossorigin src="/assets/index-7ro752HM.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BVuNrNXS.css">
 </head>
 
 <body>
   <div id="root"></div>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js');
+      });
+    }
+  </script>
 </body>
 
 </html>
