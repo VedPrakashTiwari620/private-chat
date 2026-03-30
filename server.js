@@ -1,8 +1,27 @@
 const express = require('express');
 const app     = express();
+const helmet  = require('helmet');
 const http    = require('http');
 const server  = http.createServer(app);
 const { Server } = require('socket.io');
+
+// Enable rigorous Header Security using Helmet
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            connectSrc: ["'self'", "https://*.firebaseio.com", "https://*.googleapis.com", "wss://*.firebaseio.com"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https://*.firebaseapp.com"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+            fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
+            imgSrc: ["'self'", "data:", "https://dummyimage.com", "blob:"],
+            mediaSrc: ["'self'", "blob:"] // For WebRTC streams
+        }
+    },
+    hsts: { maxAge: 31536000, includeSubDomains: true, preload: true },
+    xFrameOptions: { action: "deny" } // 100% blocks Clickjacking / iFrame embedding
+}));
+
 const io = new Server(server, { cors: { origin: '*', methods: ['GET','POST'] } });
 const path = require('path');
 
