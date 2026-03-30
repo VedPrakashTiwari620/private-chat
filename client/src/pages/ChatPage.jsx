@@ -34,31 +34,26 @@ export default function ChatPage() {
   const [facingMode,     setFacingMode]     = useState('environment');
   const [callStatus,     setCallStatus]     = useState('ringing');
   const [callCamFacing,  setCallCamFacing]  = useState('user'); // 'user'=front, 'environment'=rear
-  const [audioOutputs,   setAudioOutputs]   = useState([]);
-  const [currentAudioIdx,setCurrentAudioIdx]= useState(0);
+  const [callDuration,   setCallDuration]   = useState(0);
 
-  /* ── AUDIO SINK CYCLING ── */
+  /* ── CALL TIMER LOGIC ── */
+  const timerRef = useRef(null);
+  
   useEffect(() => {
-    if (callStatus === 'connected' && navigator.mediaDevices && navigator.mediaDevices.enumerateDevices) {
-      navigator.mediaDevices.enumerateDevices().then(devices => {
-        const outs = devices.filter(d => d.kind === 'audiooutput');
-        setAudioOutputs(outs);
-        const earpieceIdx = outs.findIndex(d => d.label.toLowerCase().includes('phone') || d.label.toLowerCase().includes('earpiece'));
-        if (earpieceIdx >= 0 && remoteVid.current && 'setSinkId' in remoteVid.current) {
-          setCurrentAudioIdx(earpieceIdx);
-          remoteVid.current.setSinkId(outs[earpieceIdx].deviceId).catch(()=>{});
-        }
-      });
+    if (callStatus === 'connected') {
+      setCallDuration(0);
+      timerRef.current = setInterval(() => setCallDuration(p => p + 1), 1000);
+    } else {
+      clearInterval(timerRef.current);
     }
+    return () => clearInterval(timerRef.current);
   }, [callStatus]);
 
-  const cycleSpeaker = useCallback(async () => {
-    if (!remoteVid.current || !('setSinkId' in remoteVid.current) || audioOutputs.length === 0) return;
-    const nextIdx = (currentAudioIdx + 1) % (audioOutputs.length + 1); // allow loop to 'default'
-    setCurrentAudioIdx(nextIdx);
-    const sinkId = nextIdx < audioOutputs.length ? audioOutputs[nextIdx].deviceId : 'default';
-    try { await remoteVid.current.setSinkId(sinkId); } catch(e) { console.warn('setSinkId err', e); }
-  }, [audioOutputs, currentAudioIdx]);
+  const formatDuration = sec => {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${s.toString().padStart(2, '0')}`;
+  };
 
   /* ── REFS ── */
   const socketRef    = useRef(null);
@@ -307,6 +302,10 @@ export default function ChatPage() {
         // Partner went offline — show Offline immediately
         setPOnline(false);
         setPStatus('Offline');
+        // If they drop offline abruptly during a call, hang up my side to prevent phantom UI
+        if (activeRef.current || callTypeRef.current !== null) {
+            endCall();
+        }
         // ★ Wait 2s for the partner's Firestore write to propagate, then read lastSeen
         setTimeout(async () => {
           try {
@@ -737,7 +736,7 @@ export default function ChatPage() {
                 {callStatus === 'ringing' && (
                   <p style={{ color:'rgba(255,255,255,0.65)', margin:0, fontSize:13 }}>
                     <i className="fas fa-circle" style={{ color:'#4cd137', fontSize:7, marginRight:6, animation:'pulse-dot 1s infinite' }} />
-                    {callType === 'video' ? 'Video' : 'Audio'} Calling...
+                    {callType === 'video' ? 'Video' : 'Audio'} Ringing...
                   </p>
                 )}
                 {callStatus === 'not_answered' && (
@@ -776,19 +775,13 @@ export default function ChatPage() {
             {/* ─── CONNECTED: controls (only shown when call is active) ─── */}
             {callStatus === 'connected' && (
               <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10, position:'absolute', bottom:20, left:'50%', transform:'translateX(-50%)', zIndex:10 }}>
-                {audioOutputs.length > 0 && (
-                  <div style={{ background:'rgba(0,0,0,0.6)', padding:'4px 10px', borderRadius:20, fontSize:12, color:'#e9edef', marginBottom: -5 }}>
-                    Speaker: {currentAudioIdx < audioOutputs.length ? audioOutputs[currentAudioIdx].label || `Device ${currentAudioIdx+1}` : 'System Default'}
-                  </div>
-                )}
+                {/* Timer Display */}
+                <div style={{ background:'rgba(0,0,0,0.4)', padding:'4px 12px', borderRadius:16, fontSize:13, color:'#fff', marginBottom:-5, fontWeight:500, border:'1px solid rgba(255,255,255,0.1)' }}>
+                  {formatDuration(callDuration)}
+                </div>
                 <div className="call-controls" style={{ position:'static', transform:'none' }}>
                   <button onClick={toggleMute}    title={audioMuted?'Unmute':'Mute'}   style={{ background: audioMuted  ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}><i className={`fas fa-microphone${audioMuted?'-slash':''}`} /></button>
                   {callType==='video' && <button onClick={toggleVideo}  title={videoOff?'Cam On':'Cam Off'} style={{ background: videoOff    ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}><i className={`fas fa-video${videoOff?'-slash':''}`} /></button>}
-                  
-                  {/* ★ Advanced Speaker Toggle */}
-                  <button onClick={cycleSpeaker} title="Change Speaker" style={{ background:'rgba(255,255,255,0.2)' }}>
-                    <i className="fas fa-volume-up" />
-                  </button>
 
                   {/* ★ Camera flip: front ⇔ rear */}
                   {callType === 'video' && (
