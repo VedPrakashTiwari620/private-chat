@@ -4,7 +4,7 @@ import { io } from 'socket.io-client';
 import { signOut } from 'firebase/auth';
 import { encryptData, decryptData } from '../utils/crypto.js';
 import {
-  collection, addDoc, onSnapshot, query, orderBy,
+  collection, addDoc, onSnapshot, query, orderBy, where,
   doc, updateDoc, arrayUnion, serverTimestamp,
   getDocs, writeBatch, setDoc, getDoc, Timestamp
 } from 'firebase/firestore';
@@ -337,8 +337,8 @@ export default function ChatPage() {
     socket.on('ice-candidate',       handleIceCandidate);
     socket.on('call-ended',          () => { if (activeRef.current) logCallEvent('ended', callTypeRef.current); endCall(); });
 
-    // Messages
-    const q       = query(collection(db, 'messages'), orderBy('timestamp'));
+    // Messages: MUST be filtered to satisfy strict Firestore security rules
+    const q       = query(collection(db, 'messages'), where('participants', 'array-contains', currentUser.uid));
     const unsubMsg = onSnapshot(q, snap => {
       const msgs = [];
       snap.forEach(d => {
@@ -350,6 +350,8 @@ export default function ChatPage() {
              msgs.push({ id: d.id, ...data });
         }
       });
+      // Sort client-side to bypass Firebase Composite Index requirement
+      msgs.sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
       setMessages(msgs);
     });
 
@@ -421,14 +423,14 @@ export default function ChatPage() {
       const img = new Image();
       img.onload = async () => {
         const c = document.createElement('canvas');
-        // HD: 2048px max, 0.92 quality — great quality, manageable size
-        const MAX = 2048;
+        // Aggressive compression: max 800px, 0.70 quality to ensure AES encrypted text payload stays safely under 1MB limit
+        const MAX = 800;
         let [w, h] = [img.width, img.height];
         if (w > h && w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
         else if (h > MAX)     { w = Math.round(w * MAX / h); h = MAX; }
         c.width = w; c.height = h;
         c.getContext('2d').drawImage(img, 0, 0, w, h);
-        await sendImage(c.toDataURL('image/jpeg', 0.92));
+        await sendImage(c.toDataURL('image/jpeg', 0.70));
       };
       img.src = e.target.result;
     };
