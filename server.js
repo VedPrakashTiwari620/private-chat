@@ -7,8 +7,12 @@ const io = new Server(server, { cors: { origin: '*', methods: ['GET','POST'] } }
 const path = require('path');
 
 app.use(express.static('public'));
-app.get('*', (req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
-
+app.get('*', (req, res) => {
+    res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.setHeader('Pragma', 'no-cache');
+    res.setHeader('Expires', '0');
+    res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
 /* ── Presence ── */
 const onlineSockets = new Set();
 
