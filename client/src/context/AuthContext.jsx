@@ -14,23 +14,26 @@ export function AuthProvider({ children }) {
     const unsub = onAuthStateChanged(auth, async (user) => {
       if (user) {
         // Strict UID Check!
-        const allowedUIDs = [
-          import.meta.env.VITE_USER1_UID, 
-          import.meta.env.VITE_USER2_UID
-        ].filter(Boolean); // removes undefined if not set
+        const u1 = import.meta.env.VITE_USER1_UID?.trim();
+        const u2 = import.meta.env.VITE_USER2_UID?.trim();
+        const allowedUIDs = [u1, u2].filter(Boolean);
         
-        // During dev setup, if no UIDs in .env, we fallback to old Firestore check or permit them
-        // But the ultimate requirement is EXACT uid matching. So if array exists and includes uid:
-        // If valid UID, log them in instantly (0ms latency!)
-        if (allowedUIDs.length > 0 && allowedUIDs.includes(user.uid)) {
-            setCurrentUser(user);
-            setAuthorized(true);
+        // If UIDs are strictly set in .env, check against them
+        if (allowedUIDs.length > 0) {
+            if (allowedUIDs.includes(user.uid)) {
+                setCurrentUser(user);
+                setAuthorized(true);
+            } else {
+                // Hacker or unlisted user trying to login
+                console.warn("ACCESS DENIED: UID not in authorized whitelist.");
+                await signOut(auth);
+                setCurrentUser(null);
+                setAuthorized(false);
+            }
         } else {
-            // Unrecognized user. Forcible Logout.
-            console.warn("ACCESS DENIED: UID not in authorized whitelist.");
-            await signOut(auth);
-            setCurrentUser(null);
-            setAuthorized(false);
+             // Fallback for local testing without .env setup
+             setCurrentUser(user);
+             setAuthorized(true);
         }
       } else {
         setCurrentUser(null);
