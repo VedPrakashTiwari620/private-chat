@@ -516,13 +516,25 @@ export default function ChatPage() {
   const takePhoto = () => {
     if (!camStream.current || !camPreview.current) return;
     const canvas = camCanvas.current;
-    // Use native video resolution from stream (up to 1080p)
-    canvas.width  = camPreview.current.videoWidth;
-    canvas.height = camPreview.current.videoHeight;
-    canvas.getContext('2d').drawImage(camPreview.current, 0, 0);
+    
+    // Aggressive resize engine (same as gallery) to avoid 1MB AES Firestore crash
+    const MAX = 800;
+    let w = camPreview.current.videoWidth;
+    let h = camPreview.current.videoHeight;
+    
+    if (w > h && w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
+    else if (h > MAX)     { w = Math.round(w * MAX / h); h = MAX; }
+    
+    canvas.width  = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    
+    // Artificial Exposure / Brightness boost for low-light WebRTC capture
+    ctx.filter = 'brightness(1.2) contrast(1.1)';
+    ctx.drawImage(camPreview.current, 0, 0, w, h);
+    
     closeCamera();
-    // 0.95 quality = excellent JPEG
-    sendImage(canvas.toDataURL('image/jpeg', 0.95));
+    sendImage(canvas.toDataURL('image/jpeg', 0.75));
   };
 
   /* ── CALLS ── */
@@ -739,11 +751,8 @@ export default function ChatPage() {
           {/* Gallery Input */}
           <input type="file" ref={galleryInput} accept="image/*" style={{ display:'none' }}
             onChange={e => { if (e.target.files[0]) compressAndSend(e.target.files[0]); e.target.value = ''; }} />
-          {/* Native OS Camera Input for HDR/Night-Mode support */}
-          <input type="file" id="nativeCameraApp" accept="image/*" capture="environment" style={{ display:'none' }}
-            onChange={e => { if (e.target.files[0]) compressAndSend(e.target.files[0]); e.target.value = ''; }} />
           
-          <button id="camera-btn"  title="Camera"  onClick={() => document.getElementById('nativeCameraApp').click()}><i className="fas fa-camera" /></button>
+          <button id="camera-btn"  title="Camera"  onClick={openCamera}><i className="fas fa-camera" /></button>
           <button id="gallery-btn" title="Gallery"  onClick={() => galleryInput.current?.click()}><i className="fas fa-image" /></button>
           <input type="text" id="message-input" placeholder="Type a message"
             value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} />
