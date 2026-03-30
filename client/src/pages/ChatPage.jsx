@@ -8,7 +8,8 @@ import {
   doc, updateDoc, arrayUnion, serverTimestamp,
   getDocs, writeBatch, setDoc, getDoc, Timestamp
 } from 'firebase/firestore';
-import { auth, db } from '../firebase.js';
+import { ref, uploadString, getDownloadURL } from 'firebase/storage';
+import { auth, db, storage } from '../firebase.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatTime, formatLastSeen } from '../utils/helpers.js';
 
@@ -436,12 +437,27 @@ export default function ChatPage() {
 
   const sendImage = async dataUrl => {
     try {
+      // Construct native Firebase Storage bucket path: /chatImages/{userId}/{fileName}
+      const fileName = `IMG_${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`;
+      const storageRef = ref(storage, `chatImages/${currentUser.uid}/${fileName}`);
+      
+      // Upload physical data
+      await uploadString(storageRef, dataUrl, 'data_url');
+      
+      // Extract direct unguessable media token URL
+      const secureUrl = await getDownloadURL(storageRef);
+
+      // Save the AES-encrypted Storage URL directly into the Firestore Chat Room
       await addDoc(collection(db, 'messages'), {
-        imageUrl: encryptData(dataUrl), sender: currentUser.email,
+        imageUrl: encryptData(secureUrl), 
+        sender: currentUser.email,
         participants: getParticipants(),
         deletedFor: [], seenBy: [], timestamp: serverTimestamp()
       });
-    } catch { alert('Upload failed.'); }
+    } catch (e) { 
+      console.error("Storage upload error: ", e);
+      alert('Upload failed: Please ensure Firebase Storage Rules are set and Storage is enabled on your Firebase Console.'); 
+    }
   };
 
   /* ── CAMERA ── */
