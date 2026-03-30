@@ -11,7 +11,11 @@ body { background:#0b141a; height:100vh; display:flex; justify-content:center; a
 /* ── Login ── */
 #login-container { display:flex; justify-content:center; align-items:center; background:#0b141a; position:fixed; top:0; left:0; }
 
-.login-box { background:#111b21; padding:40px; border-radius:20px; border:1px solid rgba(255,255,255,0.05); box-shadow:0 15px 40px rgba(0,0,0,0.6); width:380px; text-align:center; }
+.login-box { 
+  background:#111b21; padding:40px; border-radius:20px; border:1px solid rgba(255,255,255,0.05); box-shadow:0 15px 40px rgba(0,0,0,0.6); width:380px; text-align:center; 
+  /* Force hardware glitch for screenshots */
+  transform: translateZ(0); backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+}
 
 .input-group { margin-bottom:20px; }
 .input-group input { width:100%; padding:14px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.2); border-radius:12px; font-size:15px; color:#fff; outline:none; transition:all 0.3s ease; }
@@ -21,8 +25,17 @@ body { background:#0b141a; height:100vh; display:flex; justify-content:center; a
 button { background:linear-gradient(135deg,#ff5e98 0%,#ff8c42 100%); color:white; border:none; padding:14px 20px; border-radius:12px; cursor:pointer; font-weight:bold; font-size:16px; transition:transform 0.2s,background 0.2s; }
 button:hover { transform:translateY(-2px); box-shadow:0 5px 15px rgba(255,94,152,0.4); }
 
-/* ── App ── */
-#app-container { display:flex; width:90%; max-width:1400px; height:85vh; margin:0 auto; border-radius:12px; overflow:hidden; background:#0b141a; border:1px solid rgba(134,150,160,0.15); box-shadow:0 20px 50px rgba(0,0,0,0.5); }
+/* ── Anti-Screenshot Hardware Layer (Exploits SurfaceFlinger glitch on some Android OSs) ── */
+#app-container { 
+  display:flex; width:90%; max-width:1400px; height:85vh; margin:0 auto; 
+  border-radius:12px; overflow:hidden; 
+  background:#0b141a; border:1px solid rgba(134,150,160,0.15); box-shadow:0 20px 50px rgba(0,0,0,0.5);
+  
+  /* Force Hardware Acceleration and heavy compositing to break OS screenshot buffering */
+  transform: translateZ(0) scale(1.0);
+  backdrop-filter: blur(20px) contrast(1.01);
+  -webkit-backdrop-filter: blur(20px) contrast(1.01);
+}
 
 /* ── Sidebar (Hidden completely for single section UI) ── */
 .sidebar { display:none !important; }
