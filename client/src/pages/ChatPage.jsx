@@ -402,18 +402,29 @@ export default function ChatPage() {
 
   const deleteMsg = async id => {
     if (!window.confirm('Delete this message for YOU?')) return;
-    await updateDoc(doc(db, 'messages', id), { deletedFor: arrayUnion(currentUser.email) });
+    try {
+      await updateDoc(doc(db, 'messages', id), { deletedFor: arrayUnion(currentUser.email) });
+    } catch (e) {
+      console.error("Delete failed: ", e);
+      alert('Could not delete old message due to strict Security rules.');
+    }
   };
 
   const clearChat = async () => {
     if (!window.confirm('Clear entire chat history for yourself?')) return;
-    const snap  = await getDocs(collection(db, 'messages'));
-    const batch = writeBatch(db);
-    snap.docs.forEach(d => {
-      if (!d.data().deletedFor?.includes(currentUser.email))
-        batch.update(d.ref, { deletedFor: arrayUnion(currentUser.email) });
-    });
-    await batch.commit();
+    try {
+      // Must include where-clause to pass Security Rules
+      const q = query(collection(db, 'messages'), where('participants', 'array-contains', currentUser.uid));
+      const snap  = await getDocs(q);
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => {
+        if (!d.data().deletedFor?.includes(currentUser.email))
+          batch.update(d.ref, { deletedFor: arrayUnion(currentUser.email) });
+      });
+      await batch.commit();
+    } catch (e) {
+      alert("Clear chat blocked on legacy un-owned messages.");
+    }
   };
 
   /* ── IMAGE ── */
