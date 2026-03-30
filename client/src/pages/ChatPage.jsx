@@ -437,26 +437,18 @@ export default function ChatPage() {
 
   const sendImage = async dataUrl => {
     try {
-      // Construct native Firebase Storage bucket path: /chatImages/{userId}/{fileName}
-      const fileName = `IMG_${Date.now()}_${Math.floor(Math.random()*1000)}.jpg`;
-      const storageRef = ref(storage, `chatImages/${currentUser.uid}/${fileName}`);
-      
-      // Upload physical data
-      await uploadString(storageRef, dataUrl, 'data_url');
-      
-      // Extract direct unguessable media token URL
-      const secureUrl = await getDownloadURL(storageRef);
-
-      // Save the AES-encrypted Storage URL directly into the Firestore Chat Room
+      // Due to Firebase Storage free-tier region limitations, we store the compressed
+      // Base64 image completely AES ENCRYPTED directly inside the Firestore Document!
+      // This is even more secure since no physical image file or public URL ever exists online!
       await addDoc(collection(db, 'messages'), {
-        imageUrl: encryptData(secureUrl), 
+        imageUrl: encryptData(dataUrl), 
         sender: currentUser.email,
         participants: getParticipants(),
         deletedFor: [], seenBy: [], timestamp: serverTimestamp()
       });
     } catch (e) { 
-      console.error("Storage upload error: ", e);
-      alert('Upload failed: Please ensure Firebase Storage Rules are set and Storage is enabled on your Firebase Console.'); 
+      console.error("Firestore image upload error: ", e);
+      alert('Upload failed. Image may be too large or there was a network error.'); 
     }
   };
 
