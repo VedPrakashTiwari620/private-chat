@@ -668,7 +668,19 @@ export default function ChatPage() {
             {isMe && <TickIcon msg={msg} />}
           </span>
           {msg.imageUrl
-            ? <img src={msg.imageUrl} alt="" style={{ maxWidth:'100%', borderRadius:'6px', cursor:'pointer', display:'block' }} onClick={() => window.open(msg.imageUrl, '_blank')} />
+            ? <img src={msg.imageUrl} alt="" style={{ maxWidth:'100%', borderRadius:'6px', cursor:'pointer', display:'block' }} 
+                   onClick={() => window.open(msg.imageUrl, '_blank')}
+                   onContextMenu={(e) => { 
+                     e.preventDefault(); 
+                     e.stopPropagation();
+                     if (window.confirm("Do you want to Save this image securely?")) {
+                       const a = document.createElement('a'); 
+                       a.href = msg.imageUrl; 
+                       a.download = `Secure_Photo_${Date.now()}.jpg`; 
+                       a.click(); 
+                     }
+                   }} 
+              />
             : <span className="msg-text">{msg.text}</span>}
         </div>
       </div>
@@ -713,9 +725,14 @@ export default function ChatPage() {
         </div>
 
         <div className="chat-input-area">
+          {/* Gallery Input */}
           <input type="file" ref={galleryInput} accept="image/*" style={{ display:'none' }}
             onChange={e => { if (e.target.files[0]) compressAndSend(e.target.files[0]); e.target.value = ''; }} />
-          <button id="camera-btn"  title="Camera"  onClick={openCamera}><i className="fas fa-camera" /></button>
+          {/* Native OS Camera Input for HDR/Night-Mode support */}
+          <input type="file" id="nativeCameraApp" accept="image/*" capture="environment" style={{ display:'none' }}
+            onChange={e => { if (e.target.files[0]) compressAndSend(e.target.files[0]); e.target.value = ''; }} />
+          
+          <button id="camera-btn"  title="Camera"  onClick={() => document.getElementById('nativeCameraApp').click()}><i className="fas fa-camera" /></button>
           <button id="gallery-btn" title="Gallery"  onClick={() => galleryInput.current?.click()}><i className="fas fa-image" /></button>
           <input type="text" id="message-input" placeholder="Type a message"
             value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} />
