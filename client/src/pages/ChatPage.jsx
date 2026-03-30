@@ -35,7 +35,6 @@ export default function ChatPage() {
   const [showCamera,     setShowCamera]     = useState(false);
   const [facingMode,     setFacingMode]     = useState('environment');
   const [callStatus,     setCallStatus]     = useState('ringing');
-  const [speakerOn,      setSpeakerOn]      = useState(false);
   const [callCamFacing,  setCallCamFacing]  = useState('user'); // 'user'=front, 'environment'=rear
 
   /* ── REFS ── */
@@ -473,31 +472,6 @@ export default function ChatPage() {
   const toggleMute   = () => { const n = !audioMuted; setAudioMuted(n); localStream.current?.getAudioTracks().forEach(t => t.enabled = !n); };
   const toggleVideo  = () => { if (callTypeRef.current === 'audio') return; const n = !videoOff; setVideoOff(n); localStream.current?.getVideoTracks().forEach(t => t.enabled = !n); };
 
-  // ★ Speaker toggle: earpiece (default) ↔ loudspeaker
-  const toggleSpeaker = useCallback(async () => {
-    const next = !speakerOn;
-    setSpeakerOn(next);
-    const vid = remoteVid.current;
-    if (!vid) return;
-    if ('setSinkId' in vid) {
-      // Android Chrome — enumerate real device IDs
-      try {
-        const devices = await navigator.mediaDevices.enumerateDevices();
-        const outputs = devices.filter(d => d.kind === 'audiooutput');
-        if (next) {
-          const spk = outputs.find(d =>
-            d.label.toLowerCase().includes('speaker') ||
-            d.label.toLowerCase().includes('loud')
-          );
-          await vid.setSinkId(spk?.deviceId || '');
-        } else {
-          await vid.setSinkId('default');
-        }
-      } catch (e) { console.warn('setSinkId:', e); }
-    }
-    // iOS Safari: no API — show visual toggle only (system handles routing)
-  }, [speakerOn]);
-
   // ★ Camera flip: front ⇔ rear during active video call
   const toggleCallCamera = useCallback(async () => {
     if (callTypeRef.current !== 'video') return;
@@ -759,10 +733,6 @@ export default function ChatPage() {
               <div className="call-controls">
                 <button onClick={toggleMute}    title={audioMuted?'Unmute':'Mute'}   style={{ background: audioMuted  ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}><i className={`fas fa-microphone${audioMuted?'-slash':''}`} /></button>
                 {callType==='video' && <button onClick={toggleVideo}  title={videoOff?'Cam On':'Cam Off'} style={{ background: videoOff    ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}><i className={`fas fa-video${videoOff?'-slash':''}`} /></button>}
-                {/* ★ Speaker toggle button */}
-                <button onClick={toggleSpeaker}     title={speakerOn?'Earpiece':'Loudspeaker'} style={{ background: speakerOn      ? 'rgba(33,150,243,0.85)' : 'rgba(255,255,255,0.2)' }}>
-                  <i className={`fas fa-volume-${speakerOn ? 'up' : 'off'}`} />
-                </button>
                 {/* ★ Camera flip: front ⇔ rear */}
                 {callType === 'video' && (
                   <button onClick={toggleCallCamera} title={callCamFacing==='user'?'Rear Camera':'Front Camera'} style={{ background:'rgba(255,255,255,0.2)' }}>
