@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { format } from 'date-fns';
 import { io } from 'socket.io-client';
 import { signOut } from 'firebase/auth';
+import { encryptData, decryptData } from '../utils/crypto.js';
 import {
   collection, addDoc, onSnapshot, query, orderBy,
   doc, updateDoc, arrayUnion, serverTimestamp,
@@ -135,13 +137,19 @@ export default function ChatPage() {
     }
   };
 
+  const getParticipants = () => {
+    return [import.meta.env.VITE_USER1_UID || "UID1", import.meta.env.VITE_USER2_UID || "UID2"];
+  };
+
   const logCallEvent = async (event, cType) => {
     try {
       await addDoc(collection(db, 'messages'), {
         isSystemEvent: true, event, callType: cType,
-        sender: currentUser.email, deletedFor: [], seenBy: [], timestamp: serverTimestamp()
+        sender: currentUser.email,
+        participants: getParticipants(),
+        deletedFor: [], seenBy: [], timestamp: serverTimestamp()
       });
-    } catch {}
+    } catch { /* suppress */ }
   };
 
   /* ── WEBRTC ── */
@@ -335,7 +343,12 @@ export default function ChatPage() {
       const msgs = [];
       snap.forEach(d => {
         const data = d.data();
-        if (!data.deletedFor?.includes(currentUser.email)) msgs.push({ id: d.id, ...data });
+        if (!data.deletedFor?.includes(currentUser.email)) {
+             // DECRYPT text and imageUrl magically when loading from Firestore!
+             if (data.text) data.text = decryptData(data.text);
+             if (data.imageUrl) data.imageUrl = decryptData(data.imageUrl);
+             msgs.push({ id: d.id, ...data });
+        }
       });
       setMessages(msgs);
     });
@@ -377,7 +390,8 @@ export default function ChatPage() {
     const t = text.trim(); if (!t) return;
     try {
       await addDoc(collection(db, 'messages'), {
-        text: t, sender: currentUser.email,
+        text: encryptData(t), sender: currentUser.email,
+        participants: getParticipants(),
         deletedFor: [], seenBy: [], timestamp: serverTimestamp()
       });
       setText('');
@@ -424,7 +438,8 @@ export default function ChatPage() {
   const sendImage = async dataUrl => {
     try {
       await addDoc(collection(db, 'messages'), {
-        imageUrl: dataUrl, sender: currentUser.email,
+        imageUrl: encryptData(dataUrl), sender: currentUser.email,
+        participants: getParticipants(),
         deletedFor: [], seenBy: [], timestamp: serverTimestamp()
       });
     } catch { alert('Upload failed.'); }
