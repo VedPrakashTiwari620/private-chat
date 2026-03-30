@@ -645,40 +645,7 @@ export default function ChatPage() {
   return (
     <div id="app-container" className="container" style={{ display:'flex' }}>
 
-      {/* ── SIDEBAR ── */}
-      <div className="sidebar">
-        <div className="header">
-          <div className="user-info" style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-            <div style={{ width:40, height:40, borderRadius:'50%', overflow:'hidden', border:'2px solid rgba(255,255,255,0.3)', flexShrink:0 }}>
-              <i className="fas fa-user-circle" style={{fontSize: '40px', color: '#e9edef'}}></i>
-            </div>
-            <div>
-              <div id="current-user-email">My Love ❤️</div>
-              <div style={{ fontSize:11, color:'rgba(255,255,255,0.5)' }}>Online</div>
-            </div>
-          </div>
-          <div className="actions">
-            <button id="logout-btn" title="Logout" onClick={handleLogout}><i className="fas fa-sign-out-alt" /></button>
-          </div>
-        </div>
-        <div className="contact-list">
-          <div className="contact active">
-            <div style={{ position:'relative', flexShrink:0 }}>
-              <div className="contact-avatar">
-                <i className="fas fa-user-circle" style={{fontSize: '44px', color: '#e9edef'}}></i>
-              </div>
-              {pOnline && <span className="online-dot-sidebar" />}
-            </div>
-            <div className="contact-details">
-              <div className="contact-name">My Forever ❤️</div>
-              <div className="contact-status" id="partner-status" style={{ color: pOnline ? '#00e676' : '#667781', display:'flex', alignItems:'center', gap:5 }}>
-                {pOnline && <span style={{ width:7, height:7, borderRadius:'50%', background:'#00e676', display:'inline-block', boxShadow:'0 0 6px #00e676' }} />}
-                {pStatus}
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
+      {/* ── SIDEBAR REMOVED FOR SINGLE SECTION UI ── */}
 
       {/* ── MAIN CHAT ── */}
       <div className="main-chat">
@@ -697,10 +664,11 @@ export default function ChatPage() {
               </div>
             </div>
           </div>
-          <div className="call-actions">
-            <button id="clear-chat-btn" title="Clear Chat" onClick={clearChat}><i className="fas fa-trash" /></button>
-            <button id="audio-call-btn" title="Audio Call" onClick={() => initiateCall('audio')}><i className="fas fa-phone-alt" /></button>
-            <button id="video-call-btn" title="Video Call" onClick={() => initiateCall('video')}><i className="fas fa-video" /></button>
+          <div className="call-actions" style={{ display:'flex', alignItems:'center' }}>
+            <button id="clear-chat-btn" title="Clear Chat" onClick={clearChat} style={{ color:'#8696a0' }}><i className="fas fa-trash" /></button>
+            <button id="audio-call-btn" title="Audio Call" onClick={() => initiateCall('audio')} style={{ color:'#00a884' }}><i className="fas fa-phone-alt" /></button>
+            <button id="video-call-btn" title="Video Call" onClick={() => initiateCall('video')} style={{ color:'#00a884' }}><i className="fas fa-video" /></button>
+            <button id="logout-btn" title="Logout" onClick={handleLogout} style={{ color:'#e9edef', marginLeft:10 }}><i className="fas fa-sign-out-alt" /></button>
           </div>
         </div>
 

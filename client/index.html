@@ -69,7 +69,25 @@
       promptUI.style.display = 'none';
       console.log('App successfully installed!');
     });
+
+    /* ── Anti-Screen Record & Privacy Blur ── */
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        document.body.style.filter = 'blur(15px)';
+        document.body.style.opacity = '0';
+      } else {
+        document.body.style.filter = 'none';
+        document.body.style.opacity = '1';
+      }
+    });
+
+    // Disable Right Click and Inspect Element Shortcuts for safety
+    document.addEventListener('contextmenu', e => e.preventDefault());
+    document.addEventListener('keydown', e => {
+      if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['I','J','C'].includes(e.key))) {
+        e.preventDefault();
+      }
+    });
   </script>
 </body>
-
 </html>
