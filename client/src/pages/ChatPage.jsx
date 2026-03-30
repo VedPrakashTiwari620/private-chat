@@ -6,7 +6,7 @@ import { encryptData, decryptData } from '../utils/crypto.js';
 import {
   collection, addDoc, onSnapshot, query, orderBy, where,
   doc, updateDoc, arrayUnion, serverTimestamp,
-  getDocs, writeBatch, setDoc, getDoc, Timestamp
+  getDocs, writeBatch, setDoc, getDoc, Timestamp, deleteDoc
 } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { auth, db, storage } from '../firebase.js';
@@ -400,10 +400,15 @@ export default function ChatPage() {
     } catch (e) { console.error(e); }
   };
 
-  const deleteMsg = async id => {
+  const deleteMsg = async msg => {
     if (!window.confirm('Delete this message for YOU?')) return;
     try {
-      await updateDoc(doc(db, 'messages', id), { deletedFor: arrayUnion(currentUser.email) });
+      // Auto-Garbage Collection: If the other user already deleted it, and now we delete it, WIPE it permanently from Firebase!
+      if (msg.deletedFor && msg.deletedFor.length === 1 && !msg.deletedFor.includes(currentUser.email)) {
+        await deleteDoc(doc(db, 'messages', msg.id));
+      } else {
+        await updateDoc(doc(db, 'messages', msg.id), { deletedFor: arrayUnion(currentUser.email) });
+      }
     } catch (e) {
       console.error("Delete failed: ", e);
       alert('Could not delete old message due to strict Security rules.');
@@ -413,17 +418,23 @@ export default function ChatPage() {
   const clearChat = async () => {
     if (!window.confirm('Clear entire chat history for yourself?')) return;
     try {
-      // Must include where-clause to pass Security Rules
       const q = query(collection(db, 'messages'), where('participants', 'array-contains', currentUser.uid));
       const snap  = await getDocs(q);
       const batch = writeBatch(db);
       snap.docs.forEach(d => {
-        if (!d.data().deletedFor?.includes(currentUser.email))
-          batch.update(d.ref, { deletedFor: arrayUnion(currentUser.email) });
+        const data = d.data();
+        if (!data.deletedFor?.includes(currentUser.email)) {
+          // If already deleted by partner, deleteDoc completely. Otherwise, just hide for self.
+          if (data.deletedFor && data.deletedFor.length === 1 && !data.deletedFor.includes(currentUser.email)) {
+             batch.delete(d.ref); 
+          } else {
+             batch.update(d.ref, { deletedFor: arrayUnion(currentUser.email) });
+          }
+        }
       });
       await batch.commit();
     } catch (e) {
-      alert("Clear chat blocked on legacy un-owned messages.");
+      console.error("Clear chat blocked: ", e);
     }
   };
 
@@ -659,7 +670,7 @@ export default function ChatPage() {
         onClick={e => { if (isMe && e.target.className !== 'del-btn') { const b = e.currentTarget.querySelector('.del-btn'); if(b) b.style.display = b.style.display === 'none' ? 'block' : 'none'; } }}>
         {isMe && (
           <i className="fas fa-trash-alt del-btn"
-            onClick={() => deleteMsg(msg.id)}
+            onClick={() => deleteMsg(msg)}
             style={{ position:'absolute', top:'-8px', right:'-8px', background:'rgba(255,65,108,0.9)', color:'white', padding:'6px', borderRadius:'50%', fontSize:'10px', cursor:'pointer', display:'none', zIndex:10 }} />
         )}
         <div className="msg-body">
