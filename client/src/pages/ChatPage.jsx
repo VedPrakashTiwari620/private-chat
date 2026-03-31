@@ -295,10 +295,9 @@ export default function ChatPage() {
     socketRef.current = socket;
     socket.emit('user-online', { email: currentUser.email, role });
 
-    // ★ Handle Security Kicks (Multi-Login Prevention)
+    // ★ Single-Session Enforcement: silently log out older session when a new one takes over
     socket.on('security-kick', () => {
-      alert("⚠️ SECURITY ALERT: Your account was just logged into from another device! You have been logged out for safety.");
-      handleLogout();
+      handleLogout(); // Silent — no popup, just redirect to login
     });
 
     // ★ Scenario 1 support: re-send user-online on socket reconnect
