@@ -295,9 +295,22 @@ export default function ChatPage() {
     socketRef.current = socket;
     socket.emit('user-online', { email: currentUser.email, role });
 
-    // ★ Single-Session Enforcement: silently log out older session when a new one takes over
+    // ★ Single-Session Enforcement: show brief toast then silently log out
     socket.on('security-kick', () => {
-      handleLogout(); // Silent — no popup, just redirect to login
+      // Show a beautiful non-intrusive toast for 2.5s then auto-logout
+      const toast = document.createElement('div');
+      toast.innerHTML = `<i class="fas fa-shield-alt" style="margin-right:10px;color:#ff5e98;"></i>Account logged in by another device`;
+      Object.assign(toast.style, {
+        position: 'fixed', top: '20px', left: '50%', transform: 'translateX(-50%)',
+        background: '#1f1f1f', color: '#e9edef', padding: '14px 22px',
+        borderRadius: '12px', fontSize: '14px', fontWeight: '600',
+        boxShadow: '0 8px 30px rgba(0,0,0,0.6)', zIndex: '99999',
+        border: '1px solid rgba(255,94,152,0.4)', display: 'flex',
+        alignItems: 'center', fontFamily: 'Inter,sans-serif',
+        animation: 'fadeIn 0.3s ease'
+      });
+      document.body.appendChild(toast);
+      setTimeout(() => { document.body.removeChild(toast); handleLogout(); }, 2500);
     });
 
     // ★ Scenario 1 support: re-send user-online on socket reconnect
