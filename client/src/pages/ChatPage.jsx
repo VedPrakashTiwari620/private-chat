@@ -293,12 +293,17 @@ export default function ChatPage() {
     // Socket
     const socket = io();
     socketRef.current = socket;
-    socket.emit('user-online', currentUser.email);
+    socket.emit('user-online', { email: currentUser.email, role });
+
+    // ★ Handle Security Kicks (Multi-Login Prevention)
+    socket.on('security-kick', () => {
+      alert("⚠️ SECURITY ALERT: Your account was just logged into from another device! You have been logged out for safety.");
+      handleLogout();
+    });
 
     // ★ Scenario 1 support: re-send user-online on socket reconnect
-    //   so pending calls are re-delivered after brief network drop
     socket.on('reconnect', () => {
-      socket.emit('user-online', currentUser.email);
+      socket.emit('user-online', { email: currentUser.email, role });
     });
 
     // ★ Partner status via socket (source of truth for online/offline)

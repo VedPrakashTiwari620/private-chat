@@ -32,8 +32,8 @@ app.get('*', (req, res) => {
     res.setHeader('Expires', '0');
     res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
-/* ── Presence ── */
-const onlineSockets = new Set();
+/* ── Presence (Strict Single Session) ── */
+const activeSessions = new Map(); // role -> socket.id
 
 /* ── Pending call (for Scenario 1: late join) ── */
 let pendingCall = null; // { callerSocketId, data, timer }
@@ -49,19 +49,34 @@ const CALL_TIMEOUT_MS = 30000; // 30 seconds ring time
 
 io.on('connection', (socket) => {
 
-    /* ─── PRESENCE ─── */
-    socket.on('user-online', (email) => {
-        socket.userEmail = email;
-        onlineSockets.add(socket.id);
+    /* ─── PRESENCE & PROTOCOL ─── */
+    socket.on('user-online', ({ email, role }) => {
+        if (!role) return;
 
-        // Tell partner this user just came online
+        // 1. Strict Security: Session Hijack / Multi-Login Prevention
+        if (activeSessions.has(role)) {
+            const oldSocketId = activeSessions.get(role);
+            if (oldSocketId !== socket.id) {
+                // Kick out the old session and alert them of the security breach!
+                io.to(oldSocketId).emit('security-kick');
+                const oldSocket = io.sockets.sockets.get(oldSocketId);
+                if (oldSocket) oldSocket.disconnect(true);
+            }
+        }
+
+        // 2. Register current valid session
+        activeSessions.set(role, socket.id);
+        socket.userRole = role;
+
+        // 3. Notify the Partner (since there's max 1 other socket, broadcast targets only partner)
         socket.broadcast.emit('partner-status', 'online');
 
-        // Tell THIS user if partner is already online
-        if (onlineSockets.size > 1) {
+        // 4. Notify THIS socket if the partner is ALREADY online
+        const partnerRole = role === 'user1' ? 'user2' : 'user1';
+        if (activeSessions.has(partnerRole)) {
             socket.emit('partner-status', 'online');
 
-            // Scenario 1: Partner joined late — deliver pending incoming call
+            // Deliver pending delayed call
             if (pendingCall && pendingCall.callerSocketId !== socket.id) {
                 socket.emit('incoming-call', pendingCall.data);
             }
@@ -69,15 +84,18 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
-        onlineSockets.delete(socket.id);
+        // Only broadcast offline if the disconnected socket was the explicitly AUTHORIZED active session
+        if (socket.userRole && activeSessions.get(socket.userRole) === socket.id) {
+            activeSessions.delete(socket.userRole);
 
-        // If the CALLER disconnected, cancel the pending call ring
-        if (pendingCall && pendingCall.callerSocketId === socket.id) {
-            cancelPendingCall();
-            socket.broadcast.emit('call-cancelled');
+            // If the CALLER disconnected, cancel the pending call ring
+            if (pendingCall && pendingCall.callerSocketId === socket.id) {
+                cancelPendingCall();
+                socket.broadcast.emit('call-cancelled');
+            }
+
+            socket.broadcast.emit('partner-status', 'offline');
         }
-
-        socket.broadcast.emit('partner-status', 'offline');
     });
 
     /* ─── CALL SIGNALING ─── */
