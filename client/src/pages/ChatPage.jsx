@@ -501,7 +501,7 @@ export default function ChatPage() {
       // ★ 1080p — works on all phones (back & front), 4K caused failures
       camStream.current = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode,
+          facingMode: { ideal: facingMode },
           width:  { ideal: 1920 },
           height: { ideal: 1080 },
         }
@@ -523,7 +523,7 @@ export default function ChatPage() {
       try {
         // ★ 1080p for both cameras
         camStream.current = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: next, width: { ideal: 1920 }, height: { ideal: 1080 } }
+          video: { facingMode: { ideal: next }, width: { ideal: 1920 }, height: { ideal: 1080 } }
         });
         if (camPreview.current) camPreview.current.srcObject = camStream.current;
       } catch {}
@@ -827,7 +827,7 @@ export default function ChatPage() {
               </div>
             )}
             <video id="remote-video" ref={remoteVid} autoPlay playsInline style={{ display: callType==='audio'?'none':'block' }} />
-            <video id="local-video"  ref={localVid}  autoPlay playsInline muted  style={{ display: callType==='audio'?'none':'block' }} />
+            <video id="local-video"  ref={localVid}  autoPlay playsInline muted  style={{ display: callType==='audio'?'none':'block', transform: callCamFacing === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }} />
 
             {/* ─── CONNECTED: controls (only shown when call is active) ─── */}
             {callStatus === 'connected' && (
@@ -869,7 +869,7 @@ export default function ChatPage() {
       {/* ── CAMERA MODAL ── */}
       {showCamera && (
         <div style={{ display:'flex', position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'#000', zIndex:3000, flexDirection:'column' }}>
-          <video ref={camPreview} autoPlay playsInline style={{ flex:1, width:'100%', height:'calc(100% - 120px)', objectFit:'cover' }} />
+          <video ref={camPreview} autoPlay playsInline style={{ flex:1, width:'100%', height:'calc(100% - 120px)', objectFit:'cover', transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }} />
           <div style={{ position:'absolute', bottom:0, left:0, width:'100%', height:120, display:'flex', justifyContent:'space-around', alignItems:'center', background:'linear-gradient(transparent,rgba(0,0,0,0.9))', paddingBottom:'max(10px,env(safe-area-inset-bottom))' }}>
             <button onClick={closeCamera}  style={{ background:'rgba(255,255,255,0.2)', width:50, height:50, borderRadius:'50%', color:'white', border:'none', fontSize:20, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'none' }}><i className="fas fa-times" /></button>
             <button onClick={takePhoto}    style={{ background:'white', width:70, height:70, borderRadius:'50%', border:'6px solid rgba(255,255,255,0.5)', cursor:'pointer', boxShadow:'none' }} />
