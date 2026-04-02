@@ -16,11 +16,10 @@ function AppRoutes() {
   );
   return (
     <Routes>
-      <Route path="/login"  element={!authorized ? <LoginPage />      : <Navigate to="/select" replace />} />
+      <Route path="/login"  element={!authorized ? <LoginPage />      : <Navigate to={savedRole ? '/chat' : '/select'} replace />} />
       <Route path="/select" element={ authorized  ? <UserSelectPage /> : <Navigate to="/login"  replace />} />
-      <Route path="/help"   element={ authorized  ? <ChatPage />       : <Navigate to="/login"  replace />} />
-      <Route path="/chat"   element={ authorized  ? <Navigate to="/help" replace /> : <Navigate to="/login" replace />} />
-      <Route path="*"       element={<Navigate to={authorized ? (savedRole ? '/help' : '/select') : '/login'} replace />} />
+      <Route path="/chat"   element={ authorized  ? <ChatPage />       : <Navigate to="/login"  replace />} />
+      <Route path="*"       element={<Navigate to={authorized ? (savedRole ? '/chat' : '/select') : '/login'} replace />} />
     </Routes>
   );
 }

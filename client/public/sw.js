@@ -14,8 +14,8 @@ self.addEventListener('activate', (e) => {
 });
 
 self.addEventListener('fetch', (e) => {
-  // Only handle GET requests
-  if (e.request.method !== 'GET') {
+  // Only handle GET requests and local origin (to fix FontAwesome opaque cache disappearing issue)
+  if (e.request.method !== 'GET' || !e.request.url.startsWith(self.location.origin)) {
     e.respondWith(fetch(e.request));
     return;
   }
