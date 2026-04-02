@@ -13,9 +13,9 @@
   <link rel="icon" href="/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/icon-192.png">
 
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-  <script type="module" crossorigin src="/assets/index-BHupOSxH.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BywlOqAO.css">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <script type="module" crossorigin src="/assets/index-BdCphlJz.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DOgV2nvJ.css">
 </head>
 
 <body>
@@ -44,12 +44,12 @@
     const installBtn = document.getElementById('pwa-install-btn');
     const closeBtn = document.getElementById('pwa-close-btn');
 
-    // Always listen for the install prompt from the browser
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault(); // Stop standard browser infobar
-      deferredPrompt = e; // Stash event
-      promptUI.style.display = 'flex'; // Show custom UI
-    });
+    // PWA Install prompt behavior disabled via User Request
+    // window.addEventListener('beforeinstallprompt', (e) => {
+    //   e.preventDefault(); 
+    //   deferredPrompt = e; 
+    //   promptUI.style.display = 'flex'; 
+    // });
 
     installBtn.addEventListener('click', async () => {
       promptUI.style.display = 'none';
