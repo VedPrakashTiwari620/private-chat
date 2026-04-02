@@ -23,21 +23,25 @@ export function AuthProvider({ children }) {
             if (allowedUIDs.includes(user.uid)) {
                 setCurrentUser(user);
                 setAuthorized(true);
+                localStorage.setItem('userRole', user.uid === u1 ? 'user1' : 'user2');
             } else {
                 // Hacker or unlisted user trying to login
                 console.warn("ACCESS DENIED: UID not in authorized whitelist.");
                 await signOut(auth);
                 setCurrentUser(null);
                 setAuthorized(false);
+                localStorage.removeItem('userRole');
             }
         } else {
              // Fallback for local testing without .env setup
              setCurrentUser(user);
              setAuthorized(true);
+             localStorage.setItem('userRole', 'user1');
         }
       } else {
         setCurrentUser(null);
         setAuthorized(false);
+        localStorage.removeItem('userRole');
       }
       setLoading(false);
     });
