@@ -37,6 +37,7 @@ export default function ChatPage() {
   const [callStatus,     setCallStatus]     = useState('ringing');
   const [callCamFacing,  setCallCamFacing]  = useState('user'); // 'user'=front, 'environment'=rear
   const [callDuration,   setCallDuration]   = useState(0);
+  const [isRecording,    setIsRecording]    = useState(false);
 
   /* ── CALL TIMER LOGIC ── */
   const timerRef = useRef(null);
@@ -72,6 +73,8 @@ export default function ChatPage() {
   const galleryInput = useRef(null);
   const msgEnd       = useRef(null);
   const iceCandQueue = useRef([]);    // ← queued ICE candidates
+  const mediaRecorderRef = useRef(null);
+  const videoChunksRef   = useRef([]);
 
   /* ── PRESENCE ── */
   const writeMyPresence = useCallback(async (online) => {
@@ -493,18 +496,33 @@ export default function ChatPage() {
     }
   };
 
+  const sendVideo = async dataUrl => {
+    try {
+      await addDoc(collection(db, 'messages'), {
+        videoUrl: encryptData(dataUrl), 
+        sender: currentUser.email,
+        participants: getParticipants(),
+        deletedFor: [], seenBy: [], timestamp: serverTimestamp()
+      });
+    } catch (e) { 
+      console.error("Firestore video upload error: ", e);
+      alert('Upload failed. Video may be too large or there was a network error.'); 
+    }
+  };
+
   /* ── CAMERA ── */
   const openCamera = async () => {
     setShowCamera(true);
     try {
       if (camStream.current) camStream.current.getTracks().forEach(t => t.stop());
-      // ★ 1080p — works on all phones (back & front), 4K caused failures
+      // ★ 720p — works cleanly and maintains lower bitrate block-size for video recording
       camStream.current = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: { ideal: facingMode },
-          width:  { ideal: 1920 },
-          height: { ideal: 1080 },
-        }
+          width:  { ideal: 1280 },
+          height: { ideal: 720 },
+        },
+        audio: true // Needed for video recording
       });
       if (camPreview.current) camPreview.current.srcObject = camStream.current;
     } catch { setShowCamera(false); alert('Camera access denied.'); }
@@ -513,6 +531,7 @@ export default function ChatPage() {
   const closeCamera = () => {
     camStream.current?.getTracks().forEach(t => t.stop());
     camStream.current = null; setShowCamera(false);
+    setIsRecording(false);
   };
 
   const switchCamera = () => {
@@ -521,9 +540,9 @@ export default function ChatPage() {
     camStream.current?.getTracks().forEach(t => t.stop());
     setTimeout(async () => {
       try {
-        // ★ 1080p for both cameras
         camStream.current = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: next }, width: { ideal: 1920 }, height: { ideal: 1080 } }
+          video: { facingMode: { ideal: next }, width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: true
         });
         if (camPreview.current) camPreview.current.srcObject = camStream.current;
       } catch {}
@@ -534,7 +553,6 @@ export default function ChatPage() {
     if (!camStream.current || !camPreview.current) return;
     const canvas = camCanvas.current;
     
-    // Aggressive resize engine (same as gallery) to avoid 1MB AES Firestore crash
     const MAX = 800;
     let w = camPreview.current.videoWidth;
     let h = camPreview.current.videoHeight;
@@ -546,7 +564,6 @@ export default function ChatPage() {
     canvas.height = h;
     const ctx = canvas.getContext('2d');
     
-    // Artificial Exposure / Brightness boost for low-light WebRTC capture
     ctx.filter = 'brightness(1.2) contrast(1.1)';
     ctx.drawImage(camPreview.current, 0, 0, w, h);
     
@@ -554,6 +571,46 @@ export default function ChatPage() {
     sendImage(canvas.toDataURL('image/jpeg', 0.75));
   };
 
+  const startRecord = () => {
+    if (!camStream.current) return;
+    try {
+      videoChunksRef.current = [];
+      // 400kbps to ensure 10s video does not exceed ~600KB base64 string
+      const mr = new MediaRecorder(camStream.current, { videoBitsPerSecond: 400000 });
+      mr.ondataavailable = e => { if (e.data.size > 0) videoChunksRef.current.push(e.data); };
+      mr.onstop = async () => {
+        setIsRecording(false);
+        const blob = new Blob(videoChunksRef.current, { type: mr.mimeType });
+        if (blob.size > 0) {
+           const reader = new FileReader();
+           reader.onloadend = async () => {
+               await sendVideo(reader.result);
+           };
+           reader.readAsDataURL(blob);
+        }
+        closeCamera();
+      };
+      mr.start();
+      mediaRecorderRef.current = mr;
+      setIsRecording(true);
+      
+      // Safety auto-stop at 10 seconds due to strict Firestore limits
+      setTimeout(() => {
+        if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+           mediaRecorderRef.current.stop();
+        }
+      }, 10000);
+      
+    } catch (e) { alert("Video encoding not supported on your browser."); }
+  };
+
+  const stopRecord = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+       mediaRecorderRef.current.stop();
+    }
+  };
+
+  /* ── CALLS ── */
   /* ── CALLS ── */
   const initiateCall = async type => {
     try {
@@ -707,8 +764,8 @@ export default function ChatPage() {
             <span className="msg-time">{formatTime(msg.timestamp)}</span>
             {isMe && <TickIcon msg={msg} />}
           </span>
-          {msg.imageUrl
-            ? <img src={msg.imageUrl} alt="" style={{ maxWidth:'100%', borderRadius:'6px', cursor:'pointer', display:'block' }} 
+          {msg.imageUrl && (
+             <img src={msg.imageUrl} alt="" style={{ maxWidth:'100%', borderRadius:'6px', cursor:'pointer', display:'block' }} 
                    onClick={() => window.open(msg.imageUrl, '_blank')}
                    onContextMenu={(e) => { 
                      e.preventDefault(); 
@@ -721,7 +778,11 @@ export default function ChatPage() {
                      }
                    }} 
               />
-            : <span className="msg-text">{msg.text}</span>}
+          )}
+          {msg.videoUrl && (
+            <video src={msg.videoUrl} controls style={{ maxWidth:'100%', borderRadius:'6px', display:'block', maxHeight: '350px' }} />
+          )}
+          {!msg.imageUrl && !msg.videoUrl && <span className="msg-text">{msg.text}</span>}
         </div>
       </div>
     );
@@ -869,11 +930,19 @@ export default function ChatPage() {
       {/* ── CAMERA MODAL ── */}
       {showCamera && (
         <div style={{ display:'flex', position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'#000', zIndex:3000, flexDirection:'column' }}>
-          <video ref={camPreview} autoPlay playsInline style={{ flex:1, width:'100%', height:'calc(100% - 120px)', objectFit:'cover', transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }} />
+          <video ref={camPreview} autoPlay playsInline muted style={{ flex:1, width:'100%', height:'calc(100% - 120px)', objectFit:'cover', transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }} />
           <div style={{ position:'absolute', bottom:0, left:0, width:'100%', height:120, display:'flex', justifyContent:'space-around', alignItems:'center', background:'linear-gradient(transparent,rgba(0,0,0,0.9))', paddingBottom:'max(10px,env(safe-area-inset-bottom))' }}>
-            <button onClick={closeCamera}  style={{ background:'rgba(255,255,255,0.2)', width:50, height:50, borderRadius:'50%', color:'white', border:'none', fontSize:20, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'none' }}><i className="fas fa-times" /></button>
-            <button onClick={takePhoto}    style={{ background:'white', width:70, height:70, borderRadius:'50%', border:'6px solid rgba(255,255,255,0.5)', cursor:'pointer', boxShadow:'none' }} />
-            <button onClick={switchCamera} style={{ background:'rgba(255,255,255,0.2)', width:50, height:50, borderRadius:'50%', color:'white', border:'none', fontSize:20, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'none' }}><i className="fas fa-sync-alt" /></button>
+            
+            {!isRecording && <button onClick={closeCamera}  style={{ background:'rgba(255,255,255,0.2)', width:50, height:50, borderRadius:'50%', color:'white', border:'none', fontSize:20, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'none' }}><i className="fas fa-times" /></button>}
+            
+            <div style={{ display:'flex', gap:20, alignItems:'center' }}>
+              {!isRecording && <button onClick={takePhoto} title="Take Photo" style={{ background:'white', width:60, height:60, borderRadius:'50%', border:'4px solid rgba(255,255,255,0.5)', cursor:'pointer', boxShadow:'none', display:'flex', alignItems:'center', justifyContent:'center', fontSize:24, color:'#333' }}><i className="fas fa-camera" /></button>}
+              <button onClick={() => { if(isRecording) stopRecord(); else startRecord(); }} title="Record Video" style={{ background: isRecording ? '#ff4b4b' : '#333', width:isRecording?80:60, height:isRecording?80:60, borderRadius:isRecording?'20px':'50%', border: isRecording ? '4px solid rgba(255,100,100,0.5)' : '4px solid rgba(255,255,255,0.5)', cursor:'pointer', boxShadow:'none', display:'flex', alignItems:'center', justifyContent:'center', fontSize:22, color:'white', transition:'0.3s' }}>
+                {isRecording ? <div style={{display:'flex', flexDirection:'column', alignItems:'center'}}><i className="fas fa-square" style={{fontSize:20, marginBottom:4}} /> <span style={{fontSize:11, fontWeight:'800'}}>STOP</span></div> : <i className="fas fa-video" />}
+              </button>
+            </div>
+
+            {!isRecording && <button onClick={switchCamera} style={{ background:'rgba(255,255,255,0.2)', width:50, height:50, borderRadius:'50%', color:'white', border:'none', fontSize:20, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'none' }}><i className="fas fa-sync-alt" /></button>}
           </div>
           <canvas ref={camCanvas} style={{ display:'none' }} />
         </div>
