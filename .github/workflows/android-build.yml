@@ -31,7 +31,10 @@ jobs:
 
       - name: Capacitor Sync
         working-directory: ./client
-        run: npx cap sync android
+        run: |
+          mkdir dist
+          echo '<!DOCTYPE html><html><body>Loading...</body></html>' > dist/index.html
+          npx cap sync android
 
       - name: Build APK
         working-directory: ./client/android
