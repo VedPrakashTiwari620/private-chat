@@ -6,35 +6,41 @@
   <meta name="viewport"
     content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Global Capital Bank</title>
-  
+
   <!-- PWA Setup -->
   <link rel="manifest" href="/manifest.json" />
   <meta name="theme-color" content="#0f0f13" />
   <link rel="icon" href="/icon-192.png" type="image/png">
   <link rel="apple-touch-icon" href="/icon-192.png">
 
-  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" crossorigin="anonymous" referrerpolicy="no-referrer">
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet"
+    crossorigin="anonymous" referrerpolicy="no-referrer">
 </head>
 
 <body>
   <div id="root"></div>
   <script type="module" src="/src/main.jsx"></script>
   <!-- Custom PWA Install Prompt -->
-  <div id="pwa-install-prompt" style="display:none; position:fixed; bottom:20px; left:50%; transform:translateX(-50%); width:90%; max-width:400px; background:#111b21; border:1px solid rgba(134,150,160,0.15); border-radius:16px; padding:15px; z-index:9999; box-shadow:0 10px 30px rgba(0,0,0,0.7); align-items:center; gap:15px; font-family:'Inter',sans-serif;">
-    <i class="fas fa-download" style="font-size:24px; color:#00a884; background:rgba(0,168,132,0.1); padding:10px; border-radius:12px;"></i>
+  <div id="pwa-install-prompt"
+    style="display:none; position:fixed; bottom:20px; left:50%; transform:translateX(-50%); width:90%; max-width:400px; background:#111b21; border:1px solid rgba(134,150,160,0.15); border-radius:16px; padding:15px; z-index:9999; box-shadow:0 10px 30px rgba(0,0,0,0.7); align-items:center; gap:15px; font-family:'Inter',sans-serif;">
+    <i class="fas fa-download"
+      style="font-size:24px; color:#00a884; background:rgba(0,168,132,0.1); padding:10px; border-radius:12px;"></i>
     <div style="flex:1;">
       <h4 style="margin:0; color:#e9edef; font-size:15px;">Install App</h4>
-      <p style="margin:4px 0 0 0; color:#8696a0; font-size:12px; line-height:1.3;">Add to home screen for full WhatsApp-like mobile experience.</p>
+      <p style="margin:4px 0 0 0; color:#8696a0; font-size:12px; line-height:1.3;">Add to home screen for full
+        WhatsApp-like mobile experience.</p>
     </div>
-    <button id="pwa-install-btn" style="background:#00a884; color:#111b21; border:none; padding:8px 16px; border-radius:20px; font-weight:700; cursor:pointer;">Install</button>
-    <button id="pwa-close-btn" style="background:transparent; color:#8696a0; border:none; padding:8px; font-size:20px; cursor:pointer;">&times;</button>
+    <button id="pwa-install-btn"
+      style="background:#00a884; color:#111b21; border:none; padding:8px 16px; border-radius:20px; font-weight:700; cursor:pointer;">Install</button>
+    <button id="pwa-close-btn"
+      style="background:transparent; color:#8696a0; border:none; padding:8px; font-size:20px; cursor:pointer;">&times;</button>
   </div>
 
   <script>
     // Service Worker disabled permanently
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function(registrations) {
-        for(let registration of registrations) {
+      navigator.serviceWorker.getRegistrations().then(function (registrations) {
+        for (let registration of registrations) {
           registration.unregister();
         }
       });
@@ -87,10 +93,11 @@
     // Disable Right Click and Inspect Element Shortcuts for safety
     document.addEventListener('contextmenu', e => e.preventDefault());
     document.addEventListener('keydown', e => {
-      if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['I','J','C'].includes(e.key))) {
+      if (e.key === 'F12' || (e.ctrlKey && e.shiftKey && ['I', 'J', 'C'].includes(e.key))) {
         e.preventDefault();
       }
     });
   </script>
 </body>
+
 </html>
