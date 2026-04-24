@@ -32,13 +32,15 @@ jobs:
       - name: Capacitor Sync
         working-directory: ./client
         run: |
-          mkdir dist
+          mkdir -p dist
           echo '<!DOCTYPE html><html><body>Loading...</body></html>' > dist/index.html
           npx cap sync android
 
       - name: Build APK
         working-directory: ./client/android
-        run: ./gradlew assembleDebug
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
