@@ -45,6 +45,7 @@ jobs:
           VITE_USER1_UID=${{ secrets.VITE_USER1_UID }}
           VITE_USER2_UID=${{ secrets.VITE_USER2_UID }}
           VITE_AES_SECRET=${{ secrets.VITE_AES_SECRET }}
+          VITE_BACKEND_URL=https://gcapbank.onrender.com
           EOF
           echo "✅ .env file created"
 

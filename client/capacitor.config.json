@@ -2,10 +2,6 @@
   "appId": "com.gcapbank.app",
   "appName": "GCap Bank",
   "webDir": "dist",
-  "server": {
-    "url": "https://gcapbank.onrender.com",
-    "cleartext": false
-  },
   "android": {
     "allowMixedContent": false,
     "captureInput": true,

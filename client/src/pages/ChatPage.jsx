@@ -347,8 +347,14 @@ export default function ChatPage() {
     // Mark me online in Firestore
     writeMyPresence(true);
 
-    // Socket
-    const socket = io();
+    // Connect to backend — explicit URL needed since app now loads from
+    // bundled local assets (server.url removed from capacitor.config.json)
+    const BACKEND = import.meta.env.VITE_BACKEND_URL || 'https://gcapbank.onrender.com';
+    const socket = io(BACKEND, {
+      transports: ['websocket', 'polling'],
+      reconnectionAttempts: 10,
+      reconnectionDelay: 2000,
+    });
     socketRef.current = socket;
     socket.emit('user-online', { email: currentUser.email, role });
 
