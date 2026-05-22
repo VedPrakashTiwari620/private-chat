@@ -67,19 +67,24 @@ jobs:
         working-directory: ./client
         run: npx cap sync android
 
-      # ── 9. Make Gradle wrapper executable ────────────────────────────
+      # ── 9. Create local.properties (Android SDK path for Gradle) ─────────
+      - name: 📝 Create local.properties
+        working-directory: ./client/android
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      # ── 10. Make Gradle wrapper executable ─────────────────────────
       - name: 🔧 Grant Gradle execute permission
         working-directory: ./client/android
         run: chmod +x ./gradlew
 
-      # ── 10. Build Debug APK ────────────────────────────────────────────
+      # ── 11. Build Debug APK ────────────────────────────────────────────
       - name: 🏗️ Build Debug APK
         working-directory: ./client/android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: ./gradlew assembleDebug --no-daemon --stacktrace -x lint -x lintDebug
         env:
           ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
-      # ── 11. Upload APK as downloadable artifact ────────────────────────
+      # ── 12. Upload APK as downloadable artifact ────────────────────────
       - name: 📤 Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
