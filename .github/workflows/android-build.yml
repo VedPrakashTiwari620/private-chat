@@ -37,7 +37,7 @@ jobs:
 
       # ── 5. Create .env file from GitHub Secrets ───────────────────────
       #    Go to: GitHub repo → Settings → Secrets and variables → Actions
-      #    Add these 3 secrets: VITE_USER1_UID, VITE_USER2_UID, VITE_AES_SECRET
+      #    Secrets needed: VITE_USER1_UID, VITE_USER2_UID, VITE_AES_SECRET
       - name: 🔐 Create .env file from secrets
         working-directory: ./client
         run: |
@@ -46,6 +46,7 @@ jobs:
           VITE_USER2_UID=${{ secrets.VITE_USER2_UID }}
           VITE_AES_SECRET=${{ secrets.VITE_AES_SECRET }}
           VITE_BACKEND_URL=https://gcapbank.onrender.com
+          VITE_AGORA_APP_ID=82d2a689a7a34616a90ffd778665e86a
           EOF
           echo "✅ .env file created"
 

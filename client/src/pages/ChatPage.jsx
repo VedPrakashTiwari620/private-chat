@@ -4,28 +4,21 @@ import { io } from 'socket.io-client';
 import { signOut } from 'firebase/auth';
 import { encryptData, decryptData } from '../utils/crypto.js';
 import {
-  collection, addDoc, onSnapshot, query, orderBy, where,
+  collection, addDoc, onSnapshot, query, where,
   doc, updateDoc, arrayUnion, serverTimestamp,
   getDocs, writeBatch, setDoc, getDoc, Timestamp, deleteDoc
 } from 'firebase/firestore';
-import { ref, uploadString, getDownloadURL } from 'firebase/storage';
-import { auth, db, storage } from '../firebase.js';
+import { auth, db } from '../firebase.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatTime, formatLastSeen } from '../utils/helpers.js';
+import AgoraRTC from 'agora-rtc-sdk-ng';
 
-// ICE config with STUN + free TURN servers for NAT traversal
-// Uses openrelay (Metered.ca legacy free) + numb.viagenie.ca as fallbacks
-const ICE = { iceServers: [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  // numb.viagenie.ca — reliable public free TURN
-  { urls: 'turn:numb.viagenie.ca',         username: 'webrtc@live.com',     credential: 'muazkh' },
-  // Metered.ca openrelay — legacy free TURN servers
-  { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turns:openrelay.metered.ca:443',username: 'openrelayproject', credential: 'openrelayproject' },
-]};
+// Agora.io — 10,000 free minutes/month, resets monthly
+// Works across ALL networks: WiFi, mobile data, different cities, different countries
+const AGORA_APP_ID  = import.meta.env.VITE_AGORA_APP_ID || '82d2a689a7a34616a90ffd778665e86a';
+const AGORA_CHANNEL = 'gcapbank-private'; // fixed private channel for this 2-person app
+
+
 
 export default function ChatPage() {
   const { currentUser } = useAuth();
@@ -73,22 +66,22 @@ export default function ChatPage() {
   };
 
   /* ── REFS ── */
-  const socketRef       = useRef(null);
-  const pcRef           = useRef(null);
-  const localStream     = useRef(null);
-  const camStream       = useRef(null);
-  const callTypeRef     = useRef(null);
-  const callerRef       = useRef(false);
-  const activeRef       = useRef(false);
-  const localVid        = useRef(null);
-  const remoteVid       = useRef(null);
-  const camPreview      = useRef(null);
-  const camCanvas       = useRef(null);
-  const galleryInput    = useRef(null);
-  const msgEnd          = useRef(null);
-  const iceCandQueue    = useRef([]);   // queued ICE candidates
-  const typingTimerRef  = useRef(null); // debounce timer for typing indicator
-  const audioMutedRef   = useRef(false); // mirrors audioMuted state for closures
+  const socketRef        = useRef(null);
+  const agoraClient      = useRef(null);  // Agora RTC client (replaces RTCPeerConnection)
+  const localAudioTrack  = useRef(null);  // Agora local mic track
+  const localVideoTrack  = useRef(null);  // Agora local camera track
+  const camStream        = useRef(null);
+  const callTypeRef      = useRef(null);
+  const callerRef        = useRef(false);
+  const activeRef        = useRef(false);
+  const localVid         = useRef(null);
+  const remoteVid        = useRef(null);
+  const camPreview       = useRef(null);
+  const camCanvas        = useRef(null);
+  const galleryInput     = useRef(null);
+  const msgEnd           = useRef(null);
+  const typingTimerRef   = useRef(null);
+  const audioMutedRef    = useRef(false);
 
   /* ── PRESENCE ── */
   const writeMyPresence = useCallback(async (online) => {
@@ -154,9 +147,19 @@ export default function ChatPage() {
   }, []);
 
   /* ── CALL HELPERS ── */
-  const endCall = useCallback(() => {
-    nativeStopRingtone();   // stop ring if call ends before answer
-    nativeStopAudio();      // reset Android audio mode to NORMAL
+
+  // ★ Agora: stop all tracks and leave channel cleanly
+  const agoraLeave = useCallback(async () => {
+    try { localAudioTrack.current?.close(); } catch {}
+    try { localVideoTrack.current?.close(); } catch {}
+    localAudioTrack.current = null;
+    localVideoTrack.current = null;
+    try { await agoraClient.current?.leave(); } catch {}
+  }, []);
+
+  const endCall = useCallback(async () => {
+    nativeStopRingtone();
+    nativeStopAudio();
     activeRef.current = false;
     setShowCall(false);
     setShowIncoming(false);
@@ -164,37 +167,82 @@ export default function ChatPage() {
     setCallCamFacing('user');
     setNativeCallActive(false);
     audioMutedRef.current = false;
-    setSpeakerOn(true); // ★ reset speaker to ON for next call
-    if (pcRef.current)       { pcRef.current.close(); pcRef.current = null; }
-    if (localStream.current) { localStream.current.getTracks().forEach(t => t.stop()); localStream.current = null; }
-    if (localVid.current)    localVid.current.srcObject  = null;
-    if (remoteVid.current)   remoteVid.current.srcObject = null;
-    setAudioMuted(false); setVideoOff(false);
-  }, [nativeStopAudio, nativeStopRingtone]);
+    setSpeakerOn(true);
+    await agoraLeave();
+    if (localVid.current)  localVid.current.srcObject  = null;
+    if (remoteVid.current) remoteVid.current.srcObject = null;
+    setAudioMuted(false);
+    setVideoOff(false);
+  }, [nativeStopAudio, nativeStopRingtone, agoraLeave]);
 
-  const getMedia = async type => {
-    try {
-      localStream.current = await navigator.mediaDevices.getUserMedia({
-        // Audio with noise/echo suppression — no sampleRate constraint (causes failure on some Android)
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl:  true,
-        },
-        video: type === 'video' ? {
-          facingMode: 'user',
-          width:     { ideal: 1280 },
-          height:    { ideal: 720  },
-          frameRate: { ideal: 30   },
-        } : false
+  // ★ Agora: join channel, create and publish local tracks
+  const agoraJoin = useCallback(async (type) => {
+    // Initialize client once
+    if (!agoraClient.current) {
+      const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
+
+      // Remote user published their tracks — subscribe and play
+      client.on('user-published', async (user, mediaType) => {
+        try {
+          await client.subscribe(user, mediaType);
+          if (mediaType === 'video' && remoteVid.current) {
+            user.videoTrack.play(remoteVid.current);
+          }
+          if (mediaType === 'audio') {
+            user.audioTrack.play();
+            // Re-confirm speaker routing when remote audio arrives
+            nativeStartSpeaker();
+          }
+        } catch (e) { console.warn('Agora subscribe error:', e); }
       });
-      // ★ Default to LOUDSPEAKER mode so audio is clearly audible without holding phone to ear
+
+      client.on('user-unpublished', (user, mediaType) => {
+        if (mediaType === 'video' && remoteVid.current) {
+          remoteVid.current.srcObject = null;
+        }
+      });
+
+      agoraClient.current = client;
+    }
+
+    try {
+      // Create microphone audio track
+      localAudioTrack.current = await AgoraRTC.createMicrophoneAudioTrack({
+        encoderConfig: { sampleRate: 48000, bitrate: 128, stereo: false },
+        AEC: true, ANS: true, AGC: true,
+      });
+
+      // Create camera video track for video calls
+      if (type === 'video') {
+        localVideoTrack.current = await AgoraRTC.createCameraVideoTrack({
+          encoderConfig: { width: 1280, height: 720, frameRate: 30, bitrateMax: 2000 },
+          facingMode: 'user',
+        });
+      }
+
+      // UID: user1=1, user2=2 (unique integers per channel)
+      const uid = role === 'user1' ? 1 : 2;
+      await agoraClient.current.join(AGORA_APP_ID, AGORA_CHANNEL, null, uid);
+
+      const tracks = [localAudioTrack.current, localVideoTrack.current].filter(Boolean);
+      await agoraClient.current.publish(tracks);
+
+      // ★ Default audio to loudspeaker
       await nativeStartSpeaker();
+
+      // Show local video preview
+      if (type === 'video') {
+        setTimeout(() => {
+          if (localVid.current && localVideoTrack.current) {
+            localVideoTrack.current.play(localVid.current);
+          }
+        }, 80);
+      }
     } catch (e) {
       alert('Could not access camera/mic: ' + e.message);
       throw e;
     }
-  };
+  }, [role, nativeStartSpeaker]);
 
   const getParticipants = () => {
     return [import.meta.env.VITE_USER1_UID || "UID1", import.meta.env.VITE_USER2_UID || "UID2"];
@@ -211,94 +259,12 @@ export default function ChatPage() {
     } catch { /* suppress */ }
   };
 
-  /* ── WEBRTC ── */
-  const buildPC = useCallback(() => {
-    const pc = new RTCPeerConnection(ICE);
-    if (localStream.current)
-      localStream.current.getTracks().forEach(t => pc.addTrack(t, localStream.current));
-    pc.ontrack = e => {
-      if (remoteVid.current) {
-        remoteVid.current.srcObject = e.streams[0];
-        // ★ Re-confirm speakerphone routing when remote track arrives
-        nativeStartSpeaker();
-      }
-    };
-    pc.onicecandidate = e  => { if (e.candidate) socketRef.current?.emit('ice-candidate', e.candidate); };
-    // ★ Boost bitrate to Full HD+ once ICE connection is established
-    pc.oniceconnectionstatechange = () => {
-      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-        pc.getSenders().forEach(async sender => {
-          try {
-            const params = sender.getParameters();
-            if (!params.encodings?.length) params.encodings = [{}];
-            if (sender.track?.kind === 'video') {
-              params.encodings[0].maxBitrate   = 8_000_000;  // ★ 8 Mbps video
-              params.encodings[0].maxFramerate = 60;
-            } else if (sender.track?.kind === 'audio') {
-              params.encodings[0].maxBitrate   = 256_000;    // ★ 256 kbps audio
-            }
-            await sender.setParameters(params);
-          } catch (e) { /* setParameters may be unsupported on some browsers */ }
-        });
-      }
-    };
-    pcRef.current = pc;
-    return pc;
-  }, []);
-
-  // ★ Fix 1: Set local video AFTER call modal renders
-  useEffect(() => {
-    if (!showCall) return;
-    const t = setTimeout(() => {
-      if (localVid.current && localStream.current)
-        localVid.current.srcObject = localStream.current;
-    }, 80);
-    return () => clearTimeout(t);
-  }, [showCall]);
-
-  // ★ Fix 2: Flush queued ICE candidates after setRemoteDescription
-  const flushIceQueue = useCallback(async () => {
-    const pc = pcRef.current;
-    if (!pc) return;
-    const queued = iceCandQueue.current.splice(0);
-    for (const c of queued) {
-      try { await pc.addIceCandidate(new RTCIceCandidate(c)); } catch {}
-    }
-  }, []);
-
+  // ★ Agora: caller already joined channel in initiateCall.
+  // When callee joins and publishes, user-published fires automatically on BOTH sides.
   const handleCallAccepted = useCallback(async () => {
     activeRef.current = true;
     setCallStatus('connected');
     if (callerRef.current) logCallEvent('started', callTypeRef.current);
-    const pc    = buildPC();
-    const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: callTypeRef.current === 'video' });
-    await pc.setLocalDescription(offer);
-    socketRef.current?.emit('offer', offer);
-  }, [buildPC]);
-
-  const handleOffer = useCallback(async offer => {
-    const pc = buildPC();
-    await pc.setRemoteDescription(new RTCSessionDescription(offer));
-    await flushIceQueue(); // ★ apply any candidates that arrived early
-    const answer = await pc.createAnswer();
-    await pc.setLocalDescription(answer);
-    socketRef.current?.emit('answer', answer);
-  }, [buildPC, flushIceQueue]);
-
-  // ★ Fix 3: Flush queue after answer sets remoteDescription
-  const handleAnswer = useCallback(async ans => {
-    await pcRef.current?.setRemoteDescription(new RTCSessionDescription(ans));
-    await flushIceQueue();
-  }, [flushIceQueue]);
-
-  // ★ Fix 4: Queue ICE candidates if remoteDescription not set yet
-  const handleIceCandidate = useCallback(async cand => {
-    const pc = pcRef.current;
-    if (!pc || !pc.remoteDescription) {
-      iceCandQueue.current.push(cand); // queue for later
-      return;
-    }
-    try { await pc.addIceCandidate(new RTCIceCandidate(cand)); } catch (e) { console.warn('ICE error:', e); }
   }, []);
 
   const handleCallRejected = useCallback(() => {
@@ -416,10 +382,8 @@ export default function ChatPage() {
     socket.on('call-not-answered', handleCallNotAnswered);
     socket.on('call-was-missed',   handleCallWasMissed);
     socket.on('call-cancelled',    handleCallCancelled);
-    socket.on('offer',             handleOffer);
-    socket.on('answer',            handleAnswer);
-    socket.on('ice-candidate',     handleIceCandidate);
-    socket.on('call-ended',        () => { if (activeRef.current) logCallEvent('ended', callTypeRef.current); endCall(); });
+    // offer/answer/ice-candidate NOT needed — Agora handles media internally
+    socket.on('call-ended', () => { if (activeRef.current) logCallEvent('ended', callTypeRef.current); endCall(); });
 
     // Messages listener — with error handler to prevent crash on permission error
     const q = query(collection(db, 'messages'), where('participants', 'array-contains', currentUser.uid));
@@ -473,11 +437,11 @@ export default function ChatPage() {
         plugin.addListener('nativeCallState', (data) => {
           if (data.state === 'active') {
             setNativeCallActive(true);
-            localStream.current?.getAudioTracks().forEach(t => { t.enabled = false; });
+            localAudioTrack.current?.setEnabled(false); // ★ Agora mute on native call
           } else if (data.state === 'idle') {
             setNativeCallActive(false);
             if (!audioMutedRef.current) {
-              localStream.current?.getAudioTracks().forEach(t => { t.enabled = true; });
+              localAudioTrack.current?.setEnabled(true); // ★ Agora restore
             }
           }
         })
@@ -685,17 +649,18 @@ export default function ChatPage() {
       callTypeRef.current = type;
       setCallType(type);
       setCallStatus('ringing');
-      await getMedia(type);
+      await agoraJoin(type); // ★ join Agora channel + publish tracks
       setShowCall(true);
       socketRef.current?.emit('initiate-call', { caller: currentUser.email, type });
     } catch (e) {
       callerRef.current = false;
       setShowCall(false);
+      await agoraLeave();
     }
   };
 
   const acceptCall = async () => {
-    nativeStopRingtone(); // stop ring when accepting
+    nativeStopRingtone();
     try {
       setShowIncoming(false);
       const type = incomingData.type;
@@ -703,12 +668,13 @@ export default function ChatPage() {
       setCallType(type);
       setCallStatus('connected');
       activeRef.current = true;
-      await getMedia(type);
+      await agoraJoin(type); // ★ join Agora channel + publish tracks
       setShowCall(true);
       socketRef.current?.emit('accept-call');
     } catch (e) {
       activeRef.current = false;
       setShowCall(false);
+      await agoraLeave();
     }
   };
 
@@ -720,36 +686,34 @@ export default function ChatPage() {
   const toggleMute = () => {
     const n = !audioMuted;
     setAudioMuted(n);
-    audioMutedRef.current = n; // keep ref in sync for native call closure
-    localStream.current?.getAudioTracks().forEach(t => t.enabled = !n);
+    audioMutedRef.current = n;
+    localAudioTrack.current?.setEnabled(!n); // ★ Agora mute
   };
-  const toggleVideo  = () => { if (callTypeRef.current === 'audio') return; const n = !videoOff; setVideoOff(n); localStream.current?.getVideoTracks().forEach(t => t.enabled = !n); };
+  const toggleVideo = () => {
+    if (callTypeRef.current === 'audio') return;
+    const n = !videoOff;
+    setVideoOff(n);
+    localVideoTrack.current?.setEnabled(!n); // ★ Agora video toggle
+  };
 
-  // ★ Camera flip: front ⇔ rear during active video call
+  // ★ Camera flip: front ⇔ rear during active video call (Agora hot-swap)
   const toggleCallCamera = useCallback(async () => {
     if (callTypeRef.current !== 'video') return;
     const newFacing = callCamFacing === 'user' ? 'environment' : 'user';
     try {
-      // Get new video-only stream with opposite camera
-      const newStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: newFacing, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } },
-        audio: false
+      const newVideoTrack = await AgoraRTC.createCameraVideoTrack({
+        encoderConfig: { width: 1280, height: 720, frameRate: 30, bitrateMax: 2000 },
+        facingMode: newFacing,
       });
-      const newTrack = newStream.getVideoTracks()[0];
-      if (!newTrack) return;
-
-      // Hot-swap track in PeerConnection (no call restart needed)
-      if (pcRef.current) {
-        const sender = pcRef.current.getSenders().find(s => s.track?.kind === 'video');
-        if (sender) await sender.replaceTrack(newTrack);
+      if (agoraClient.current && localVideoTrack.current) {
+        await agoraClient.current.unpublish([localVideoTrack.current]);
+        localVideoTrack.current.close();
+        localVideoTrack.current = newVideoTrack;
+        await agoraClient.current.publish([newVideoTrack]);
+      } else {
+        localVideoTrack.current = newVideoTrack;
       }
-
-      // Replace in localStream and update preview
-      if (localStream.current) {
-        localStream.current.getVideoTracks().forEach(t => { t.stop(); localStream.current.removeTrack(t); });
-        localStream.current.addTrack(newTrack);
-        if (localVid.current) localVid.current.srcObject = localStream.current;
-      }
+      if (localVid.current) newVideoTrack.play(localVid.current);
       setCallCamFacing(newFacing);
     } catch (e) {
       alert('Camera switch failed: ' + e.message);
