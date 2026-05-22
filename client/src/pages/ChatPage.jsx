@@ -461,19 +461,23 @@ export default function ChatPage() {
     let nativeCallSub = null;
     const plugin = nativePlugin();
     if (plugin?.addListener) {
-      plugin.addListener('nativeCallState', (data) => {
-        if (data.state === 'active') {
-          setNativeCallActive(true);
-          // Mute WebRTC audio so user can speak on native call
-          localStream.current?.getAudioTracks().forEach(t => { t.enabled = false; });
-        } else if (data.state === 'idle') {
-          setNativeCallActive(false);
-          // Restore WebRTC audio (only if user hadn't manually muted)
-          if (!audioMutedRef.current) {
-            localStream.current?.getAudioTracks().forEach(t => { t.enabled = true; });
+      // Capacitor native addListener() can return EITHER:
+      //   a) Promise<PluginListenerHandle>  (web/PWA)
+      //   b) PluginListenerHandle directly  (Android native bridge)
+      // Promise.resolve() safely wraps both cases.
+      Promise.resolve(
+        plugin.addListener('nativeCallState', (data) => {
+          if (data.state === 'active') {
+            setNativeCallActive(true);
+            localStream.current?.getAudioTracks().forEach(t => { t.enabled = false; });
+          } else if (data.state === 'idle') {
+            setNativeCallActive(false);
+            if (!audioMutedRef.current) {
+              localStream.current?.getAudioTracks().forEach(t => { t.enabled = true; });
+            }
           }
-        }
-      }).then(sub => { nativeCallSub = sub; }).catch(() => {});
+        })
+      ).then(handle => { nativeCallSub = handle; }).catch(() => {});
     }
 
     // Presence
