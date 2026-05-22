@@ -13,7 +13,16 @@ import { auth, db, storage } from '../firebase.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatTime, formatLastSeen } from '../utils/helpers.js';
 
-const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
+// ICE config with STUN + free TURN servers (openrelay) for NAT traversal
+const ICE = { iceServers: [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  // Free TURN servers — ensures WebRTC works even on mobile data / symmetric NAT
+  { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turns:openrelay.metered.ca:443',username: 'openrelayproject', credential: 'openrelayproject' },
+]};
 
 export default function ChatPage() {
   const { currentUser } = useAuth();
@@ -30,13 +39,15 @@ export default function ChatPage() {
   const [showIncoming, setShowIncoming] = useState(false);
   const [incomingData, setIncomingData] = useState(null);
   const [callType,     setCallType]     = useState(null);
-  const [audioMuted,   setAudioMuted]   = useState(false);
-  const [videoOff,       setVideoOff]       = useState(false);
-  const [showCamera,     setShowCamera]     = useState(false);
-  const [facingMode,     setFacingMode]     = useState('environment');
-  const [callStatus,     setCallStatus]     = useState('ringing');
-  const [callCamFacing,  setCallCamFacing]  = useState('user'); // 'user'=front, 'environment'=rear
-  const [callDuration,   setCallDuration]   = useState(0);
+  const [audioMuted,      setAudioMuted]      = useState(false);
+  const [videoOff,        setVideoOff]        = useState(false);
+  const [showCamera,      setShowCamera]      = useState(false);
+  const [facingMode,      setFacingMode]      = useState('environment');
+  const [callStatus,      setCallStatus]      = useState('ringing');
+  const [callCamFacing,   setCallCamFacing]   = useState('user');
+  const [callDuration,    setCallDuration]    = useState(0);
+  const [pTyping,         setPTyping]         = useState(false);   // partner is typing
+  const [nativeCallActive, setNativeCallActive] = useState(false); // native phone call in progress
 
   /* ── CALL TIMER LOGIC ── */
   const timerRef = useRef(null);
@@ -58,20 +69,22 @@ export default function ChatPage() {
   };
 
   /* ── REFS ── */
-  const socketRef    = useRef(null);
-  const pcRef        = useRef(null);
-  const localStream  = useRef(null);
-  const camStream    = useRef(null);
-  const callTypeRef  = useRef(null);
-  const callerRef    = useRef(false);
-  const activeRef    = useRef(false);
-  const localVid     = useRef(null);
-  const remoteVid    = useRef(null);
-  const camPreview   = useRef(null);
-  const camCanvas    = useRef(null);
-  const galleryInput = useRef(null);
-  const msgEnd       = useRef(null);
-  const iceCandQueue = useRef([]);    // ← queued ICE candidates
+  const socketRef       = useRef(null);
+  const pcRef           = useRef(null);
+  const localStream     = useRef(null);
+  const camStream       = useRef(null);
+  const callTypeRef     = useRef(null);
+  const callerRef       = useRef(false);
+  const activeRef       = useRef(false);
+  const localVid        = useRef(null);
+  const remoteVid       = useRef(null);
+  const camPreview      = useRef(null);
+  const camCanvas       = useRef(null);
+  const galleryInput    = useRef(null);
+  const msgEnd          = useRef(null);
+  const iceCandQueue    = useRef([]);   // queued ICE candidates
+  const typingTimerRef  = useRef(null); // debounce timer for typing indicator
+  const audioMutedRef   = useRef(false); // mirrors audioMuted state for closures
 
   /* ── PRESENCE ── */
   const writeMyPresence = useCallback(async (online) => {
@@ -98,40 +111,56 @@ export default function ChatPage() {
     }).catch(() => {});
   }, []);
 
-  /* ── NATIVE AUDIO ROUTING HELPERS (Capacitor Android only) ── */
-  // Routes call audio to earpiece (front speaker) like WhatsApp — works via native Java bridge
-  // On browser/desktop this is safely a no-op
+  /* ── NATIVE PLUGIN HELPERS (Capacitor Android only — safe no-op on browser) ── */
+  const nativePlugin = () => window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins.AudioRoute : null;
+
+  // Route audio to earpiece (front speaker) like WhatsApp
   const nativeStartEarpiece = useCallback(async () => {
-    try {
-      if (window.Capacitor?.isNativePlatform?.()) {
-        await window.Capacitor.Plugins.AudioRoute.startEarpiece();
-      }
-    } catch (e) { console.warn('AudioRoute.startEarpiece failed:', e); }
+    try { await nativePlugin()?.startEarpiece(); } catch (e) { console.warn('startEarpiece:', e); }
   }, []);
 
+  // Reset audio mode after call
   const nativeStopAudio = useCallback(() => {
+    try { nativePlugin()?.stopAudio(); } catch (e) { console.warn('stopAudio:', e); }
+  }, []);
+
+  // Play ringtone + vibration on incoming call
+  const nativePlayRingtone = useCallback(async () => {
+    try { await nativePlugin()?.playRingtone(); } catch (e) { console.warn('playRingtone:', e); }
+  }, []);
+
+  // Stop ringtone + vibration
+  const nativeStopRingtone = useCallback(() => {
+    try { nativePlugin()?.stopRingtone(); } catch (e) { console.warn('stopRingtone:', e); }
+  }, []);
+
+  // Save image to phone gallery via native MediaStore
+  const nativeSaveImage = useCallback(async (base64, filename) => {
     try {
-      if (window.Capacitor?.isNativePlatform?.()) {
-        window.Capacitor.Plugins.AudioRoute.stopAudio();
-      }
-    } catch (e) { console.warn('AudioRoute.stopAudio failed:', e); }
+      const plugin = nativePlugin();
+      if (!plugin) return false;
+      await plugin.saveImageToGallery({ base64, filename: filename || `GCapBank_${Date.now()}.jpg` });
+      return true;
+    } catch (e) { console.warn('saveImageToGallery:', e); return false; }
   }, []);
 
   /* ── CALL HELPERS ── */
   const endCall = useCallback(() => {
-    // Reset native Android audio mode back to NORMAL before anything else
-    nativeStopAudio();
+    nativeStopRingtone();   // stop ring if call ends before answer
+    nativeStopAudio();      // reset Android audio mode to NORMAL
     activeRef.current = false;
     setShowCall(false);
     setShowIncoming(false);
     setCallStatus('ringing');
-    setCallCamFacing('user'); // reset to front cam for next call
-    if (pcRef.current)   { pcRef.current.close(); pcRef.current = null; }
+    setCallCamFacing('user');
+    setNativeCallActive(false);
+    audioMutedRef.current = false;
+    if (pcRef.current)       { pcRef.current.close(); pcRef.current = null; }
     if (localStream.current) { localStream.current.getTracks().forEach(t => t.stop()); localStream.current = null; }
-    if (localVid.current)  localVid.current.srcObject  = null;
-    if (remoteVid.current) remoteVid.current.srcObject = null;
+    if (localVid.current)    localVid.current.srcObject  = null;
+    if (remoteVid.current)   remoteVid.current.srcObject = null;
     setAudioMuted(false); setVideoOff(false);
-  }, [nativeStopAudio]);
+  }, [nativeStopAudio, nativeStopRingtone]);
 
   const getMedia = async type => {
     try {
@@ -287,15 +316,32 @@ export default function ChatPage() {
     setShowIncoming(false);
   }, []);
 
-  // ★ Caller cancelled before answer
+  // Caller cancelled before answer
   const handleCallCancelled = useCallback(() => {
+    nativeStopRingtone();
     setShowIncoming(false);
     endCall();
-  }, [endCall]);
+  }, [endCall, nativeStopRingtone]);
+
+  /* ── TYPING HELPERS ── */
+  const writeTyping = useCallback(async (isTyping) => {
+    if (!role) return;
+    try { await updateDoc(doc(db, 'presence', role), { typing: isTyping }); } catch {}
+  }, [role]);
+
+  const handleTypingInput = useCallback((val) => {
+    setText(val);
+    writeTyping(true);
+    clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = setTimeout(() => writeTyping(false), 3000);
+  }, [writeTyping]);
 
   /* ── MAIN SETUP ── */
   useEffect(() => {
     if (!role) { navigate('/select', { replace: true }); return; }
+
+    // Request camera + mic permissions on startup (needed for WebRTC getUserMedia)
+    nativePlugin()?.requestMediaPermissions?.().catch(() => {});
 
     // Mark me online in Firestore
     writeMyPresence(true);
@@ -305,9 +351,8 @@ export default function ChatPage() {
     socketRef.current = socket;
     socket.emit('user-online', { email: currentUser.email, role });
 
-    // ★ Single-Session Enforcement: show brief toast then silently log out
+    // Single-Session Enforcement
     socket.on('security-kick', () => {
-      // Show a beautiful non-intrusive toast for 2.5s then auto-logout
       const toast = document.createElement('div');
       toast.innerHTML = `<i class="fas fa-shield-alt" style="margin-right:10px;color:#ff5e98;"></i>Account logged in by another device`;
       Object.assign(toast.style, {
@@ -317,31 +362,24 @@ export default function ChatPage() {
         boxShadow: '0 8px 30px rgba(0,0,0,0.6)', zIndex: '99999',
         border: '1px solid rgba(255,94,152,0.4)', display: 'flex',
         alignItems: 'center', fontFamily: 'Inter,sans-serif',
-        animation: 'fadeIn 0.3s ease'
       });
       document.body.appendChild(toast);
       setTimeout(() => { document.body.removeChild(toast); handleLogout(); }, 2500);
     });
 
-    // ★ Scenario 1 support: re-send user-online on socket reconnect
-    socket.on('reconnect', () => {
-      socket.emit('user-online', { email: currentUser.email, role });
-    });
+    // Re-send user-online on socket reconnect
+    socket.on('reconnect', () => socket.emit('user-online', { email: currentUser.email, role }));
 
-    // ★ Partner status via socket (source of truth for online/offline)
+    // Partner online/offline status via socket
     socket.on('partner-status', async (status) => {
       if (status === 'online') {
         setPOnline(true);
         setPStatus('Online');
       } else {
-        // Partner went offline — show Offline immediately
         setPOnline(false);
+        setPTyping(false);
         setPStatus('Offline');
-        // If they drop offline abruptly during a call, hang up my side to prevent phantom UI
-        if (activeRef.current || callTypeRef.current !== null) {
-            endCall();
-        }
-        // ★ Wait 2s for the partner's Firestore write to propagate, then read lastSeen
+        if (activeRef.current || callTypeRef.current !== null) endCall();
         setTimeout(async () => {
           try {
             const snap = await getDoc(doc(db, 'presence', partnerRole));
@@ -353,36 +391,68 @@ export default function ChatPage() {
       }
     });
 
-    socket.on('incoming-call',      data => { callerRef.current = false; callTypeRef.current = data.type; setIncomingData(data); setShowIncoming(true); });
-    socket.on('call-accepted',       handleCallAccepted);
-    socket.on('call-rejected',       handleCallRejected);
-    socket.on('call-not-answered',   handleCallNotAnswered);
-    socket.on('call-was-missed',     handleCallWasMissed);
-    socket.on('call-cancelled',      handleCallCancelled);
-    socket.on('offer',               handleOffer);
-    socket.on('answer',              handleAnswer);
-    socket.on('ice-candidate',       handleIceCandidate);
-    socket.on('call-ended',          () => { if (activeRef.current) logCallEvent('ended', callTypeRef.current); endCall(); });
+    // Incoming call — play ringtone
+    socket.on('incoming-call', data => {
+      callerRef.current  = false;
+      callTypeRef.current = data.type;
+      setIncomingData(data);
+      setShowIncoming(true);
+      nativePlayRingtone(); // ★ ring + vibrate
+    });
 
-    // Messages: MUST be filtered to satisfy strict Firestore security rules
-    const q       = query(collection(db, 'messages'), where('participants', 'array-contains', currentUser.uid));
+    socket.on('call-accepted',     handleCallAccepted);
+    socket.on('call-rejected',     handleCallRejected);
+    socket.on('call-not-answered', handleCallNotAnswered);
+    socket.on('call-was-missed',   handleCallWasMissed);
+    socket.on('call-cancelled',    handleCallCancelled);
+    socket.on('offer',             handleOffer);
+    socket.on('answer',            handleAnswer);
+    socket.on('ice-candidate',     handleIceCandidate);
+    socket.on('call-ended',        () => { if (activeRef.current) logCallEvent('ended', callTypeRef.current); endCall(); });
+
+    // Messages listener
+    const q = query(collection(db, 'messages'), where('participants', 'array-contains', currentUser.uid));
     const unsubMsg = onSnapshot(q, snap => {
       const msgs = [];
       snap.forEach(d => {
         const data = d.data();
         if (!data.deletedFor?.includes(currentUser.email)) {
-             // DECRYPT text and imageUrl magically when loading from Firestore!
-             if (data.text) data.text = decryptData(data.text);
-             if (data.imageUrl) data.imageUrl = decryptData(data.imageUrl);
-             msgs.push({ id: d.id, ...data });
+          if (data.text)     data.text     = decryptData(data.text);
+          if (data.imageUrl) data.imageUrl = decryptData(data.imageUrl);
+          msgs.push({ id: d.id, ...data });
         }
       });
-      // Sort client-side to bypass Firebase Composite Index requirement
       msgs.sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
       setMessages(msgs);
     });
 
-    // Go offline when tab hidden / closed
+    // ★ Firestore real-time listener for partner TYPING state
+    const unsubTyping = onSnapshot(doc(db, 'presence', partnerRole), snap => {
+      if (!snap.exists()) return;
+      const d = snap.data();
+      setPTyping(d.typing === true && d.online === true);
+    });
+
+    // ★ Native phone call state — auto-mute WebRTC when native call arrives
+    let nativeCallSub = null;
+    const plugin = nativePlugin();
+    if (plugin?.addListener) {
+      plugin.addListener('nativeCallState', (data) => {
+        if (data.state === 'active') {
+          setNativeCallActive(true);
+          // Mute WebRTC audio so user can speak on native call
+          localStream.current?.getAudioTracks().forEach(t => { t.enabled = false; });
+        } else if (data.state === 'idle') {
+          setNativeCallActive(false);
+          // Restore WebRTC audio (only if user hadn't manually muted)
+          if (!audioMutedRef.current) {
+            localStream.current?.getAudioTracks().forEach(t => { t.enabled = true; });
+          }
+        }
+      }).then(sub => { nativeCallSub = sub; }).catch(() => {});
+    }
+
+    // Presence
     const handleVis = () => writeMyPresence(!document.hidden);
     document.addEventListener('visibilitychange', handleVis);
     window.addEventListener('beforeunload', () => writeMyPresence(false));
@@ -390,7 +460,11 @@ export default function ChatPage() {
     return () => {
       socket.disconnect();
       unsubMsg();
+      unsubTyping();
+      nativeCallSub?.remove?.();
       endCall();
+      writeTyping(false);
+      clearTimeout(typingTimerRef.current);
       writeMyPresence(false);
       document.removeEventListener('visibilitychange', handleVis);
     };
@@ -417,6 +491,9 @@ export default function ChatPage() {
   /* ── MESSAGING ── */
   const sendMessage = async () => {
     const t = text.trim(); if (!t) return;
+    // Clear typing indicator immediately on send
+    clearTimeout(typingTimerRef.current);
+    writeTyping(false);
     try {
       await addDoc(collection(db, 'messages'), {
         text: encryptData(t), sender: currentUser.email,
@@ -581,6 +658,7 @@ export default function ChatPage() {
   };
 
   const acceptCall = async () => {
+    nativeStopRingtone(); // stop ring when accepting
     try {
       setShowIncoming(false);
       const type = incomingData.type;
@@ -597,8 +675,17 @@ export default function ChatPage() {
     }
   };
 
-  const rejectCall   = () => { setShowIncoming(false); socketRef.current?.emit('reject-call'); };
-  const toggleMute   = () => { const n = !audioMuted; setAudioMuted(n); localStream.current?.getAudioTracks().forEach(t => t.enabled = !n); };
+  const rejectCall = () => {
+    nativeStopRingtone(); // stop ring when rejecting
+    setShowIncoming(false);
+    socketRef.current?.emit('reject-call');
+  };
+  const toggleMute = () => {
+    const n = !audioMuted;
+    setAudioMuted(n);
+    audioMutedRef.current = n; // keep ref in sync for native call closure
+    localStream.current?.getAudioTracks().forEach(t => t.enabled = !n);
+  };
   const toggleVideo  = () => { if (callTypeRef.current === 'audio') return; const n = !videoOff; setVideoOff(n); localStream.current?.getVideoTracks().forEach(t => t.enabled = !n); };
 
   // ★ Camera flip: front ⇔ rear during active video call
@@ -720,14 +807,21 @@ export default function ChatPage() {
           {msg.imageUrl
             ? <img src={msg.imageUrl} alt="" style={{ maxWidth:'100%', borderRadius:'6px', cursor:'pointer', display:'block' }} 
                    onClick={() => window.open(msg.imageUrl, '_blank')}
-                   onContextMenu={(e) => { 
+                   onContextMenu={async (e) => { 
                      e.preventDefault(); 
                      e.stopPropagation();
-                     if (window.confirm("Do you want to Save this image securely?")) {
-                       const a = document.createElement('a'); 
-                       a.href = msg.imageUrl; 
-                       a.download = `Secure_Photo_${Date.now()}.jpg`; 
-                       a.click(); 
+                     if (!window.confirm('Save this image to your gallery?')) return;
+                     const fname = `GCapBank_${Date.now()}.jpg`;
+                     // Try native Android gallery save first
+                     const saved = await nativeSaveImage(msg.imageUrl, fname);
+                     if (saved) {
+                       alert('✅ Photo saved to Gallery!');
+                     } else {
+                       // Browser fallback (desktop/web)
+                       const a = document.createElement('a');
+                       a.href = msg.imageUrl;
+                       a.download = fname;
+                       a.click();
                      }
                    }} 
               />
@@ -757,7 +851,11 @@ export default function ChatPage() {
             <div>
               <h2 style={{ margin:0, lineHeight:1.2 }}>My Forever ❤️</h2>
               <div className={`chat-partner-status-text${pOnline ? ' is-online' : ''}`}>
-                {pOnline ? <><span className="status-dot" />Online</> : pStatus}
+                {pOnline
+                  ? pTyping
+                    ? <><span className="status-dot" style={{background:'#8696a0'}} />Typing...</>
+                    : <><span className="status-dot" />Online</>
+                  : pStatus}
               </div>
             </div>
           </div>
@@ -782,7 +880,9 @@ export default function ChatPage() {
           <button id="camera-btn"  title="Camera"  onClick={openCamera}><i className="fas fa-camera" /></button>
           <button id="gallery-btn" title="Gallery"  onClick={() => galleryInput.current?.click()}><i className="fas fa-image" /></button>
           <input type="text" id="message-input" placeholder="Type a message"
-            value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === 'Enter' && sendMessage()} />
+            value={text}
+            onChange={e => handleTypingInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && sendMessage()} />
           <button id="send-btn" onClick={sendMessage}><i className="fas fa-paper-plane" /></button>
         </div>
       </div>
@@ -839,18 +939,26 @@ export default function ChatPage() {
             <video id="remote-video" ref={remoteVid} autoPlay playsInline style={{ display: callType==='audio'?'none':'block' }} />
             <video id="local-video"  ref={localVid}  autoPlay playsInline muted  style={{ display: callType==='audio'?'none':'block', transform: callCamFacing === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }} />
 
-            {/* ─── CONNECTED: controls (only shown when call is active) ─── */}
+            {/* ─── CONNECTED: controls ─── */}
             {callStatus === 'connected' && (
-              <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10, position:'absolute', bottom:20, left:'50%', transform:'translateX(-50%)', zIndex:10 }}>
-                {/* Timer Display */}
+              <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10, position:'absolute', bottom:20, left:'50%', transform:'translateX(-50%)', zIndex:10, width:'100%' }}>
+
+                {/* ★ Native call "On Hold" banner */}
+                {nativeCallActive && (
+                  <div style={{ background:'rgba(255,152,0,0.9)', color:'white', padding:'6px 16px', borderRadius:20, fontSize:12, fontWeight:700, display:'flex', alignItems:'center', gap:6 }}>
+                    <i className="fas fa-pause-circle" />
+                    Call on Hold — Answering native call
+                  </div>
+                )}
+
                 <div style={{ background:'rgba(0,0,0,0.4)', padding:'4px 12px', borderRadius:16, fontSize:13, color:'#fff', marginBottom:-5, fontWeight:500, border:'1px solid rgba(255,255,255,0.1)' }}>
                   {formatDuration(callDuration)}
                 </div>
                 <div className="call-controls" style={{ position:'static', transform:'none' }}>
-                  <button onClick={toggleMute}    title={audioMuted?'Unmute':'Mute'}   style={{ background: audioMuted  ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}><i className={`fas fa-microphone${audioMuted?'-slash':''}`} /></button>
-                  {callType==='video' && <button onClick={toggleVideo}  title={videoOff?'Cam On':'Cam Off'} style={{ background: videoOff    ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}><i className={`fas fa-video${videoOff?'-slash':''}`} /></button>}
-
-                  {/* ★ Camera flip: front ⇔ rear */}
+                  <button onClick={toggleMute}   title={audioMuted||nativeCallActive?'Unmute':'Mute'} style={{ background: (audioMuted||nativeCallActive) ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}>
+                    <i className={`fas fa-microphone${(audioMuted||nativeCallActive)?'-slash':''}`} />
+                  </button>
+                  {callType==='video' && <button onClick={toggleVideo} title={videoOff?'Cam On':'Cam Off'} style={{ background: videoOff ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}><i className={`fas fa-video${videoOff?'-slash':''}`} /></button>}
                   {callType === 'video' && (
                     <button onClick={toggleCallCamera} title={callCamFacing==='user'?'Rear Camera':'Front Camera'} style={{ background:'rgba(255,255,255,0.2)' }}>
                       <i className="fas fa-sync-alt" />
