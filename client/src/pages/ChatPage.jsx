@@ -112,10 +112,12 @@ export default function ChatPage() {
   /* ── NATIVE PLUGIN HELPERS (Capacitor Android only — safe no-op on browser) ── */
   const nativePlugin = () => window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins.AudioRoute : null;
 
-  // ★ NOTE: nativeStartSpeaker / nativeStartEarpiece conflict with Agora's internal audio engine.
-  // Agora (WebRTC in WebView) manages audio routing directly via Android AudioManager MODE_IN_COMMUNICATION.
-  // Calling setSpeakerphoneOn from native AFTER Agora starts causes the audio to cut out.
-  // Solution: Let Agora handle audio routing naturally — earpiece is the default for MODE_IN_COMMUNICATION.
+  // ★ Route audio to earpiece (front speaker) — like a regular phone call
+  // IMPORTANT: Must be called 800ms AFTER Agora publishes, not before.
+  // Calling too early gets overridden by Agora's audio session initialization.
+  const nativeStartEarpiece = useCallback(() => {
+    try { nativePlugin()?.startEarpiece(); } catch (e) { console.warn('startEarpiece:', e); }
+  }, []);
 
   // Reset audio mode after call
   const nativeStopAudio = useCallback(() => {
@@ -187,7 +189,8 @@ export default function ChatPage() {
           }
           if (mediaType === 'audio') {
             user.audioTrack.play();
-            // ★ Agora handles audio routing via MODE_IN_COMMUNICATION — no native call needed
+            // ★ Re-confirm earpiece routing when remote audio arrives (also with delay)
+            setTimeout(() => nativeStartEarpiece(), 800);
           }
         } catch (e) { console.warn('Agora subscribe error:', e); }
       });
@@ -223,8 +226,10 @@ export default function ChatPage() {
       const tracks = [localAudioTrack.current, localVideoTrack.current].filter(Boolean);
       await agoraClient.current.publish(tracks);
 
-      // ★ Let Agora handle audio routing — default MODE_IN_COMMUNICATION = earpiece (correct behavior)
-      // Do NOT call nativeStartSpeaker/Earpiece here — it conflicts with Agora's audio engine
+      // ★ Route to front earpiece (front speaker) with 800ms delay.
+      // Delay is required: Agora's audio engine finishes initializing ~300-500ms after publish().
+      // Calling setSpeakerphoneOn too early gets overridden by Agora's internal audio setup.
+      setTimeout(() => nativeStartEarpiece(), 800);
 
       // Show local video preview
       if (type === 'video') {
