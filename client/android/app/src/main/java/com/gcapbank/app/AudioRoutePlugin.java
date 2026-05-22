@@ -60,6 +60,18 @@ public class AudioRoutePlugin extends Plugin {
     private TelephonyCallback  modernPhoneCallback;  // API 31+
     private boolean phoneListenerRegistered = false;
 
+    // ── Inner class for API 31+ TelephonyCallback ──────────────────────────
+    // Cannot use anonymous class here — TelephonyCallback.onCallStateChanged
+    // requires implementing TelephonyCallback.CallStateListener interface.
+    @RequiresApi(api = Build.VERSION_CODES.S)
+    private class AppCallCallback extends TelephonyCallback
+            implements TelephonyCallback.CallStateListener {
+        @Override
+        public void onCallStateChanged(int state) {
+            notifyNativeCallState(state);
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     //  Plugin lifecycle
     // ─────────────────────────────────────────────────────────────────────────
@@ -327,13 +339,9 @@ public class AudioRoutePlugin extends Plugin {
             if (telephonyManager == null || phoneListenerRegistered) return;
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                // API 31+ — TelephonyCallback (not deprecated)
-                modernPhoneCallback = new TelephonyCallback() {
-                    @Override
-                    public void onCallStateChanged(int state) {
-                        notifyNativeCallState(state);
-                    }
-                };
+                // API 31+ — use named inner class (anonymous class cannot implement
+                // TelephonyCallback.CallStateListener in an @Override)
+                modernPhoneCallback = new AppCallCallback();
                 telephonyManager.registerTelephonyCallback(
                         getContext().getMainExecutor(),
                         modernPhoneCallback);
