@@ -4,6 +4,7 @@ import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import UserSelectPage from './pages/UserSelectPage.jsx';
 import ChatPage from './pages/ChatPage.jsx';
+import ErrorBoundary from './ErrorBoundary.jsx';
 
 function AppRoutes() {
   const { currentUser, loading, authorized } = useAuth();
@@ -37,5 +38,5 @@ export default function App() {
     return () => { document.removeEventListener('keydown', block); };
   }, []);
 
-  return <AuthProvider><AppRoutes /></AuthProvider>;
+  return <AuthProvider><ErrorBoundary><AppRoutes /></ErrorBoundary></AuthProvider>;
 }

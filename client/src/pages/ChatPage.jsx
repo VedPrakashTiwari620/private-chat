@@ -417,7 +417,7 @@ export default function ChatPage() {
     socket.on('ice-candidate',     handleIceCandidate);
     socket.on('call-ended',        () => { if (activeRef.current) logCallEvent('ended', callTypeRef.current); endCall(); });
 
-    // Messages listener
+    // Messages listener — with error handler to prevent crash on permission error
     const q = query(collection(db, 'messages'), where('participants', 'array-contains', currentUser.uid));
     const unsubMsg = onSnapshot(q, snap => {
       const msgs = [];
@@ -431,14 +431,31 @@ export default function ChatPage() {
       });
       msgs.sort((a, b) => (a.timestamp?.seconds || 0) - (b.timestamp?.seconds || 0));
       setMessages(msgs);
+    }, (err) => {
+      // Firestore permission error — fail silently, don't crash
+      console.warn('Messages listener error:', err.code, err.message);
     });
 
     // ★ Firestore real-time listener for partner TYPING state
-    const unsubTyping = onSnapshot(doc(db, 'presence', partnerRole), snap => {
-      if (!snap.exists()) return;
-      const d = snap.data();
-      setPTyping(d.typing === true && d.online === true);
-    });
+    // Wrapped in try/catch + error handler to gracefully handle security rule rejections
+    let unsubTyping = () => {}; // default no-op unsubscribe
+    try {
+      unsubTyping = onSnapshot(
+        doc(db, 'presence', partnerRole),
+        snap => {
+          if (!snap.exists()) return;
+          const d = snap.data();
+          setPTyping(d.typing === true && d.online === true);
+        },
+        err => {
+          // Permission denied — typing indicator won't work, but app doesn't crash
+          console.warn('Typing listener error (non-fatal):', err.code);
+          setPTyping(false);
+        }
+      );
+    } catch (e) {
+      console.warn('Could not start typing listener:', e);
+    }
 
     // ★ Native phone call state — auto-mute WebRTC when native call arrives
     let nativeCallSub = null;
@@ -748,6 +765,8 @@ export default function ChatPage() {
 
   /* ── RENDER MESSAGE ── */
   const renderMessage = msg => {
+    // Guard: currentUser might be null briefly on mount
+    if (!currentUser) return null;
     const isMe = msg.sender === currentUser.email;
 
     if (msg.isSystemEvent) {
