@@ -17,10 +17,10 @@ jobs:
         uses: actions/checkout@v4
 
       # ── 2. Setup Node.js ──────────────────────────────────────────────
-      - name: 🟢 Setup Node.js 18
+      - name: 🟢 Setup Node.js 22 (required by Capacitor CLI v8)
         uses: actions/setup-node@v4
         with:
-          node-version: 18
+          node-version: 22
           cache: 'npm'
           cache-dependency-path: client/package-lock.json
 
