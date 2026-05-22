@@ -53,12 +53,16 @@ jobs:
         working-directory: ./client
         run: npm ci
 
-      # ── 7. Build React app → outputs to ../public/ ────────────────────
-      - name: ⚛️ Build React app (Vite)
+      # ── 7. Build React app → dist/ (what Capacitor's webDir expects) ──
+      # Note: vite.config.js normally outputs to ../public for the server,
+      # but for Capacitor APK build we output to dist/ instead.
+      # The APK uses live server URL (capacitor.config.json → server.url),
+      # so dist/ just needs valid assets for cap sync to proceed.
+      - name: ⚛️ Build React app → dist/ for Capacitor
         working-directory: ./client
-        run: npm run build
+        run: npx vite build --outDir dist --emptyOutDir
 
-      # ── 8. Sync built web assets into Android project ─────────────────
+      # ── 8. Sync dist/ assets into Android project ─────────────────────
       - name: 🔄 Capacitor sync → Android
         working-directory: ./client
         run: npx cap sync android
