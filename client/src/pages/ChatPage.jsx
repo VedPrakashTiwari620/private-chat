@@ -340,8 +340,9 @@ export default function ChatPage() {
   useEffect(() => {
     if (!role) { navigate('/select', { replace: true }); return; }
 
-    // Request camera + mic permissions on startup (needed for WebRTC getUserMedia)
-    nativePlugin()?.requestMediaPermissions?.().catch(() => {});
+    // NOTE: Camera/mic permissions are handled automatically by Capacitor's WebView
+    // when getUserMedia() is called — do NOT call ActivityCompat.requestPermissions()
+    // at startup, it pauses the Activity and causes WebView to go blank!
 
     // Mark me online in Firestore
     writeMyPresence(true);
