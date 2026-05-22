@@ -37,14 +37,15 @@ export default function ChatPage() {
   const [callType,     setCallType]     = useState(null);
   const [audioMuted,      setAudioMuted]      = useState(false);
   const [videoOff,        setVideoOff]        = useState(false);
-  const [speakerOn,       setSpeakerOn]       = useState(true);  // ★ loudspeaker ON by default
   const [showCamera,      setShowCamera]      = useState(false);
   const [facingMode,      setFacingMode]      = useState('environment');
   const [callStatus,      setCallStatus]      = useState('ringing');
   const [callCamFacing,   setCallCamFacing]   = useState('user');
   const [callDuration,    setCallDuration]    = useState(0);
-  const [pTyping,         setPTyping]         = useState(false);   // partner is typing
+  const [pTyping,         setPTyping]         = useState(false);
   const [nativeCallActive, setNativeCallActive] = useState(false); // native phone call in progress
+  const [callMinimized,   setCallMinimized]   = useState(false);  // ★ call running but UI hidden (WhatsApp-style)
+  const [remoteHeld,      setRemoteHeld]      = useState(false);  // ★ remote user answered native call → show HOLD
 
   /* ── CALL TIMER LOGIC ── */
   const timerRef = useRef(null);
@@ -111,15 +112,10 @@ export default function ChatPage() {
   /* ── NATIVE PLUGIN HELPERS (Capacitor Android only — safe no-op on browser) ── */
   const nativePlugin = () => window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins.AudioRoute : null;
 
-  // ★ Route audio to SPEAKERPHONE (front/loudspeaker) — default for calls
-  const nativeStartSpeaker = useCallback(async () => {
-    try { await nativePlugin()?.startSpeaker(); } catch (e) { console.warn('startSpeaker:', e); }
-  }, []);
-
-  // Route audio to earpiece (small top speaker) — used when user toggles speaker off
-  const nativeStartEarpiece = useCallback(async () => {
-    try { await nativePlugin()?.startEarpiece(); } catch (e) { console.warn('startEarpiece:', e); }
-  }, []);
+  // ★ NOTE: nativeStartSpeaker / nativeStartEarpiece conflict with Agora's internal audio engine.
+  // Agora (WebRTC in WebView) manages audio routing directly via Android AudioManager MODE_IN_COMMUNICATION.
+  // Calling setSpeakerphoneOn from native AFTER Agora starts causes the audio to cut out.
+  // Solution: Let Agora handle audio routing naturally — earpiece is the default for MODE_IN_COMMUNICATION.
 
   // Reset audio mode after call
   const nativeStopAudio = useCallback(() => {
@@ -166,8 +162,9 @@ export default function ChatPage() {
     setCallStatus('ringing');
     setCallCamFacing('user');
     setNativeCallActive(false);
+    setCallMinimized(false); // ★ reset minimize state
+    setRemoteHeld(false);    // ★ reset hold state
     audioMutedRef.current = false;
-    setSpeakerOn(true);
     await agoraLeave();
     if (localVid.current)  localVid.current.srcObject  = null;
     if (remoteVid.current) remoteVid.current.srcObject = null;
@@ -190,8 +187,7 @@ export default function ChatPage() {
           }
           if (mediaType === 'audio') {
             user.audioTrack.play();
-            // Re-confirm speaker routing when remote audio arrives
-            nativeStartSpeaker();
+            // ★ Agora handles audio routing via MODE_IN_COMMUNICATION — no native call needed
           }
         } catch (e) { console.warn('Agora subscribe error:', e); }
       });
@@ -227,8 +223,8 @@ export default function ChatPage() {
       const tracks = [localAudioTrack.current, localVideoTrack.current].filter(Boolean);
       await agoraClient.current.publish(tracks);
 
-      // ★ Default audio to loudspeaker
-      await nativeStartSpeaker();
+      // ★ Let Agora handle audio routing — default MODE_IN_COMMUNICATION = earpiece (correct behavior)
+      // Do NOT call nativeStartSpeaker/Earpiece here — it conflicts with Agora's audio engine
 
       // Show local video preview
       if (type === 'video') {
@@ -242,7 +238,7 @@ export default function ChatPage() {
       alert('Could not access camera/mic: ' + e.message);
       throw e;
     }
-  }, [role, nativeStartSpeaker]);
+  }, [role]);
 
   const getParticipants = () => {
     return [import.meta.env.VITE_USER1_UID || "UID1", import.meta.env.VITE_USER2_UID || "UID2"];
@@ -384,6 +380,9 @@ export default function ChatPage() {
     socket.on('call-cancelled',    handleCallCancelled);
     // offer/answer/ice-candidate NOT needed — Agora handles media internally
     socket.on('call-ended', () => { if (activeRef.current) logCallEvent('ended', callTypeRef.current); endCall(); });
+    // ★ WhatsApp-style hold: partner answered a native call
+    socket.on('call-held',    () => setRemoteHeld(true));
+    socket.on('call-resumed', () => setRemoteHeld(false));
 
     // Messages listener — with error handler to prevent crash on permission error
     const q = query(collection(db, 'messages'), where('participants', 'array-contains', currentUser.uid));
@@ -436,13 +435,17 @@ export default function ChatPage() {
       Promise.resolve(
         plugin.addListener('nativeCallState', (data) => {
           if (data.state === 'active') {
+            // Native call started — mute app call audio + signal partner
             setNativeCallActive(true);
-            localAudioTrack.current?.setEnabled(false); // ★ Agora mute on native call
+            localAudioTrack.current?.setEnabled(false);
+            socketRef.current?.emit('call-hold'); // ★ tell partner: show HOLD
           } else if (data.state === 'idle') {
+            // Native call ended — restore app call audio + signal partner
             setNativeCallActive(false);
             if (!audioMutedRef.current) {
-              localAudioTrack.current?.setEnabled(true); // ★ Agora restore
+              localAudioTrack.current?.setEnabled(true);
             }
+            socketRef.current?.emit('call-resume'); // ★ tell partner: remove HOLD
           }
         })
       ).then(handle => { nativeCallSub = handle; }).catch(() => {});
@@ -453,8 +456,17 @@ export default function ChatPage() {
     document.addEventListener('visibilitychange', handleVis);
     window.addEventListener('beforeunload', () => writeMyPresence(false));
 
-    // Android hardware back button — navigate to select instead of closing the app
-    const handleBackBtn = () => { navigate('/select', { replace: true }); };
+    // Android hardware back button:
+    // ★ During active call — minimize call (keep Agora running), show floating banner in chat
+    // ★ Otherwise — navigate to select screen
+    const handleBackBtn = () => {
+      if (activeRef.current && showCall) {
+        setShowCall(false);       // hide full-screen call overlay
+        setCallMinimized(true);   // show floating mini banner in chat
+      } else {
+        navigate('/select', { replace: true });
+      }
+    };
     document.addEventListener('backbutton', handleBackBtn, false);
 
     return () => {
@@ -895,99 +907,161 @@ export default function ChatPage() {
       </div>
 
       {/* ── CALL MODAL ── */}
-      {showCall && (
-        <div id="call-modal" className="modal" style={{ display:'flex' }}>
-          <div className="video-container">
+        {/* ★ MINIMIZED CALL BANNER — shown when user presses back during active call */}
+        {callMinimized && activeRef.current && (
+          <div
+            onClick={() => { setShowCall(true); setCallMinimized(false); }}
+            style={{
+              position: 'fixed', top: 0, left: 0, right: 0, zIndex: 9999,
+              background: 'linear-gradient(90deg, #075e54, #128c7e)',
+              color: '#fff', padding: '10px 16px',
+              display: 'flex', alignItems: 'center', gap: 10,
+              cursor: 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            }}
+          >
+            <i className="fas fa-phone" style={{ animation: 'pulse 1.2s infinite' }} />
+            <span style={{ flex: 1, fontWeight: 600, fontSize: 14 }}>
+              {callType === 'video' ? 'Video' : 'Audio'} call in progress — tap to return
+            </span>
+            <span style={{ fontSize: 13, opacity: 0.85 }}>{formatDuration(callDuration)}</span>
+            <button
+              onClick={e => { e.stopPropagation(); endCallClick(); }}
+              style={{ background: '#e53935', border: 'none', borderRadius: '50%', width: 32, height: 32, color: '#fff', cursor: 'pointer' }}
+            >
+              <i className="fas fa-phone-slash" />
+            </button>
+          </div>
+        )}
 
-            {/* ─── RINGING / NOT-ANSWERED / DECLINED overlay ─── */}
-            {(callStatus === 'ringing' || callStatus === 'not_answered' || callStatus === 'declined') && (
-              <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,0.82)', gap:14, zIndex:10 }}>
-                <div style={{ width:90, height:90, borderRadius:'50%', overflow:'hidden', border:'3px solid rgba(255,255,255,0.35)', boxShadow:'0 0 20px rgba(255,255,255,0.1)' }}>
-                  <i className="fas fa-user-circle" style={{fontSize: '80px', color: '#e9edef'}}></i>
+        {showCall && (
+          <div id="call-modal" className="modal" style={{ display:'flex' }}>
+            <div className="video-container">
+
+              {/* ★ HEADER: minimize button (chevron down) + call type + status/timer */}
+              <div style={{ position:'absolute', top:0, left:0, right:0, zIndex:15, display:'flex', alignItems:'center', padding:'12px 14px', gap:10, background:'linear-gradient(to bottom,rgba(0,0,0,0.6),transparent)' }}>
+                <button
+                  onClick={() => { setShowCall(false); setCallMinimized(true); }}
+                  style={{ background:'transparent', border:'none', color:'#fff', fontSize:22, cursor:'pointer', padding:'4px 8px', lineHeight:1 }}
+                  title="Minimize — call stays active"
+                >
+                  <i className="fas fa-chevron-down" />
+                </button>
+                <span style={{ color:'#fff', fontWeight:700, fontSize:15, flex:1 }}>
+                  {callType === 'video' ? '📹 Video Call' : '📞 Audio Call'}
+                </span>
+                <span style={{ color:'rgba(255,255,255,0.75)', fontSize:13 }}>
+                  {callStatus === 'ringing' ? 'Ringing...' : callStatus === 'connected' ? formatDuration(callDuration) : callStatus}
+                </span>
+              </div>
+
+              {/* ★ HOLD OVERLAY — remote user answered a native phone call */}
+              {remoteHeld && (
+                <div style={{
+                  position:'absolute', inset:0, zIndex:20,
+                  background:'rgba(0,0,0,0.78)',
+                  display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:14,
+                }}>
+                  <i className="fas fa-pause-circle fa-3x" style={{ color:'#FFB300' }} />
+                  <p style={{ color:'#fff', fontWeight:700, fontSize:20, margin:0 }}>Call on Hold</p>
+                  <p style={{ color:'rgba(255,255,255,0.7)', fontSize:14, margin:0, textAlign:'center', padding:'0 24px' }}>
+                    Other person answered a phone call
+                  </p>
                 </div>
-                <p style={{ color:'white', fontSize:17, fontWeight:600, margin:0 }}>My Forever ❤️</p>
+              )}
 
-                {callStatus === 'ringing' && (
-                  <p style={{ color:'rgba(255,255,255,0.65)', margin:0, fontSize:13 }}>
-                    <i className="fas fa-circle" style={{ color:'#4cd137', fontSize:7, marginRight:6, animation:'pulse-dot 1s infinite' }} />
-                    {callType === 'video' ? 'Video' : 'Audio'} Ringing...
-                  </p>
-                )}
-                {callStatus === 'not_answered' && (
-                  <p style={{ color:'#ff9800', margin:0, fontSize:13 }}>
-                    <i className="fas fa-phone-slash" style={{ marginRight:6 }} /> Not Answered
-                  </p>
-                )}
-                {callStatus === 'declined' && (
-                  <p style={{ color:'#ff4b4b', margin:0, fontSize:13 }}>
-                    <i className="fas fa-phone-slash" style={{ marginRight:6 }} /> Call Declined
-                  </p>
-                )}
+              {/* ★ MY HOLD BANNER — shown when I answered a native call */}
+              {nativeCallActive && (
+                <div style={{
+                  position:'absolute', top:70, left:'50%', transform:'translateX(-50%)',
+                  background:'rgba(255,152,0,0.92)', color:'#fff',
+                  padding:'6px 18px', borderRadius:20, fontSize:13, fontWeight:700,
+                  display:'flex', alignItems:'center', gap:8, zIndex:21, whiteSpace:'nowrap',
+                }}>
+                  <i className="fas fa-pause-circle" /> Answering phone call — app call muted
+                </div>
+              )}
 
-                {/* ★ FIX: End button INSIDE overlay — always accessible during ringing */}
-                {callStatus === 'ringing' && (
-                  <button
-                    id="end-call-ringing"
-                    onClick={endCallClick}
-                    style={{ marginTop:8, background:'#e8004d', border:'none', borderRadius:'50%', width:60, height:60, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 15px rgba(232,0,77,0.5)', fontSize:22, color:'white', zIndex:20 }}>
-                    <i className="fas fa-phone-slash" />
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* ─── CONNECTED: video feeds ─── */}
-            {callType === 'audio' && callStatus === 'connected' && (
-              <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%' }}>
-                <i className="fas fa-microphone fa-4x" style={{ color:'white' }} />
-                <p style={{ color:'white', marginTop:10 }}>Audio Call in Progress</p>
-              </div>
-            )}
-            <video id="remote-video" ref={remoteVid} autoPlay playsInline style={{ display: callType==='audio'?'none':'block' }} />
-            <video id="local-video"  ref={localVid}  autoPlay playsInline muted  style={{ display: callType==='audio'?'none':'block', transform: callCamFacing === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }} />
-
-            {/* ─── CONNECTED: controls ─── */}
-            {callStatus === 'connected' && (
-              <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10, position:'absolute', bottom:20, left:'50%', transform:'translateX(-50%)', zIndex:10, width:'100%' }}>
-
-                {/* ★ Native call "On Hold" banner */}
-                {nativeCallActive && (
-                  <div style={{ background:'rgba(255,152,0,0.9)', color:'white', padding:'6px 16px', borderRadius:20, fontSize:12, fontWeight:700, display:'flex', alignItems:'center', gap:6 }}>
-                    <i className="fas fa-pause-circle" />
-                    Call on Hold — Answering native call
+              {/* ─── RINGING / NOT-ANSWERED / DECLINED overlay ─── */}
+              {(callStatus === 'ringing' || callStatus === 'not_answered' || callStatus === 'declined') && (
+                <div style={{ position:'absolute', inset:0, display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', background:'rgba(0,0,0,0.82)', gap:14, zIndex:10 }}>
+                  <div style={{ width:90, height:90, borderRadius:'50%', overflow:'hidden', border:'3px solid rgba(255,255,255,0.35)', boxShadow:'0 0 20px rgba(255,255,255,0.1)' }}>
+                    <i className="fas fa-user-circle" style={{fontSize: '80px', color: '#e9edef'}}></i>
                   </div>
-                )}
+                  <p style={{ color:'white', fontSize:17, fontWeight:600, margin:0 }}>My Forever ❤️</p>
 
-                <div style={{ background:'rgba(0,0,0,0.4)', padding:'4px 12px', borderRadius:16, fontSize:13, color:'#fff', marginBottom:-5, fontWeight:500, border:'1px solid rgba(255,255,255,0.1)' }}>
-                  {formatDuration(callDuration)}
-                </div>
-                <div className="call-controls" style={{ position:'static', transform:'none' }}>
-                  <button onClick={toggleMute}   title={audioMuted||nativeCallActive?'Unmute':'Mute'} style={{ background: (audioMuted||nativeCallActive) ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}>
-                    <i className={`fas fa-microphone${(audioMuted||nativeCallActive)?'-slash':''}`} />
-                  </button>
-                  {/* ★ Speaker toggle — tap to switch between loudspeaker and earpiece */}
-                  <button onClick={async () => {
-                    const next = !speakerOn;
-                    setSpeakerOn(next);
-                    if (next) await nativeStartSpeaker(); else await nativeStartEarpiece();
-                  }} title={speakerOn ? 'Switch to Earpiece' : 'Switch to Speaker'}
-                    style={{ background: speakerOn ? 'rgba(0,200,100,0.7)' : 'rgba(255,255,255,0.2)' }}>
-                    <i className={`fas fa-volume-${speakerOn ? 'up' : 'off'}`} />
-                  </button>
-                  {callType==='video' && <button onClick={toggleVideo} title={videoOff?'Cam On':'Cam Off'} style={{ background: videoOff ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}><i className={`fas fa-video${videoOff?'-slash':''}`} /></button>}
-                  {callType === 'video' && (
-                    <button onClick={toggleCallCamera} title={callCamFacing==='user'?'Rear Camera':'Front Camera'} style={{ background:'rgba(255,255,255,0.2)' }}>
-                      <i className="fas fa-sync-alt" />
+                  {callStatus === 'ringing' && (
+                    <p style={{ color:'rgba(255,255,255,0.65)', margin:0, fontSize:13 }}>
+                      <i className="fas fa-circle" style={{ color:'#4cd137', fontSize:7, marginRight:6, animation:'pulse-dot 1s infinite' }} />
+                      {callType === 'video' ? 'Video' : 'Audio'} Ringing...
+                    </p>
+                  )}
+                  {callStatus === 'not_answered' && (
+                    <p style={{ color:'#ff9800', margin:0, fontSize:13 }}>
+                      <i className="fas fa-phone-slash" style={{ marginRight:6 }} /> Not Answered
+                    </p>
+                  )}
+                  {callStatus === 'declined' && (
+                    <p style={{ color:'#ff4b4b', margin:0, fontSize:13 }}>
+                      <i className="fas fa-phone-slash" style={{ marginRight:6 }} /> Call Declined
+                    </p>
+                  )}
+
+                  {callStatus === 'ringing' && (
+                    <button
+                      id="end-call-ringing"
+                      onClick={endCallClick}
+                      style={{ marginTop:8, background:'#e8004d', border:'none', borderRadius:'50%', width:60, height:60, cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 15px rgba(232,0,77,0.5)', fontSize:22, color:'white', zIndex:20 }}
+                    >
+                      <i className="fas fa-phone-slash" />
                     </button>
                   )}
-                  <button id="end-call" className="danger" onClick={endCallClick}><i className="fas fa-phone-slash" /></button>
                 </div>
-              </div>
-            )}
+              )}
 
+              {/* ─── CONNECTED: audio-only UI ─── */}
+              {callType === 'audio' && callStatus === 'connected' && (
+                <div style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', height:'100%' }}>
+                  <i className="fas fa-microphone fa-4x" style={{ color:'white' }} />
+                  <p style={{ color:'white', marginTop:10 }}>Audio Call in Progress</p>
+                </div>
+              )}
+              <video id="remote-video" ref={remoteVid} autoPlay playsInline style={{ display: callType==='audio'?'none':'block' }} />
+              <video id="local-video"  ref={localVid}  autoPlay playsInline muted  style={{ display: callType==='audio'?'none':'block', transform: callCamFacing === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }} />
+
+              {/* ─── CONNECTED: controls ─── */}
+              {callStatus === 'connected' && (
+                <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10, position:'absolute', bottom:20, left:'50%', transform:'translateX(-50%)', zIndex:10, width:'100%' }}>
+                  <div style={{ background:'rgba(0,0,0,0.4)', padding:'4px 12px', borderRadius:16, fontSize:13, color:'#fff', marginBottom:-5, fontWeight:500, border:'1px solid rgba(255,255,255,0.1)' }}>
+                    {formatDuration(callDuration)}
+                  </div>
+                  <div className="call-controls" style={{ position:'static', transform:'none' }}>
+                    <button onClick={toggleMute} title={audioMuted||nativeCallActive?'Unmute':'Mute'}
+                      style={{ background: (audioMuted||nativeCallActive) ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}>
+                      <i className={`fas fa-microphone${(audioMuted||nativeCallActive)?'-slash':''}`} />
+                    </button>
+                    {callType==='video' && (
+                      <button onClick={toggleVideo} title={videoOff?'Cam On':'Cam Off'}
+                        style={{ background: videoOff ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}>
+                        <i className={`fas fa-video${videoOff?'-slash':''}`} />
+                      </button>
+                    )}
+                    {callType === 'video' && (
+                      <button onClick={toggleCallCamera} title={callCamFacing==='user'?'Rear Camera':'Front Camera'}
+                        style={{ background:'rgba(255,255,255,0.2)' }}>
+                        <i className="fas fa-sync-alt" />
+                      </button>
+                    )}
+                    <button id="end-call" className="danger" onClick={endCallClick}>
+                      <i className="fas fa-phone-slash" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+            </div>
           </div>
-        </div>
-      )}
+        )}
+
 
       {/* ── INCOMING CALL ── */}
       {showIncoming && (

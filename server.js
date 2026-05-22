@@ -130,11 +130,17 @@ io.on('connection', (socket) => {
         socket.broadcast.emit('call-cancelled'); // tells receiver
     });
 
-    /* ─── WEBRTC ─── */
+    /* ─── WEBRTC / AGORA SIGNALING ─── */
     socket.on('offer',         (d) => socket.broadcast.emit('offer',         d));
     socket.on('answer',        (d) => socket.broadcast.emit('answer',        d));
     socket.on('ice-candidate', (d) => socket.broadcast.emit('ice-candidate', d));
     socket.on('end-call',      ()  => socket.broadcast.emit('call-ended'));
+
+    /* ─── HOLD / RESUME (WhatsApp-style native call interruption) ─── */
+    // Emitted when THIS user gets a native call → tell partner to show HOLD
+    socket.on('call-hold',   () => socket.broadcast.emit('call-held'));
+    // Emitted when native call ends → tell partner to remove HOLD
+    socket.on('call-resume', () => socket.broadcast.emit('call-resumed'));
 });
 
 const PORT = process.env.PORT || 3000;
