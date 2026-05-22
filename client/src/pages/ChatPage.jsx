@@ -13,13 +13,17 @@ import { auth, db, storage } from '../firebase.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatTime, formatLastSeen } from '../utils/helpers.js';
 
-// ICE config with STUN + free TURN servers (openrelay) for NAT traversal
+// ICE config with STUN + reliable TURN servers for NAT traversal (mobile data / symmetric NAT)
 const ICE = { iceServers: [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun2.l.google.com:19302' },
-  // Free TURN servers — ensures WebRTC works even on mobile data / symmetric NAT
-  { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'stun:stun.relay.metered.ca:80' },
+  // Metered.ca global TURN servers — most reliable free option
+  { urls: 'turn:global.relay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turn:global.relay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
+  { urls: 'turns:global.relay.metered.ca:443?transport=tcp',username: 'openrelayproject', credential: 'openrelayproject' },
+  // Extra fallback TURN
   { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turns:openrelay.metered.ca:443',username: 'openrelayproject', credential: 'openrelayproject' },
 ]};
@@ -485,6 +489,10 @@ export default function ChatPage() {
     document.addEventListener('visibilitychange', handleVis);
     window.addEventListener('beforeunload', () => writeMyPresence(false));
 
+    // Android hardware back button — navigate to select instead of closing the app
+    const handleBackBtn = () => { navigate('/select', { replace: true }); };
+    document.addEventListener('backbutton', handleBackBtn, false);
+
     return () => {
       socket.disconnect();
       unsubMsg();
@@ -495,6 +503,7 @@ export default function ChatPage() {
       clearTimeout(typingTimerRef.current);
       writeMyPresence(false);
       document.removeEventListener('visibilitychange', handleVis);
+      document.removeEventListener('backbutton', handleBackBtn, false);
     };
   }, [role]);
 
@@ -835,9 +844,13 @@ export default function ChatPage() {
             {isMe && <TickIcon msg={msg} />}
           </span>
           {msg.imageUrl
-            ? <img src={msg.imageUrl} alt="" style={{ maxWidth:'100%', borderRadius:'6px', cursor:'pointer', display:'block' }} 
-                   onClick={() => window.open(msg.imageUrl, '_blank')}
-                   onContextMenu={async (e) => { 
+            ? <img 
+                src={msg.imageUrl} 
+                alt="" 
+                style={{ maxWidth:'100%', borderRadius:'6px', cursor:'pointer', display:'block' }} 
+                onClick={() => window.open(msg.imageUrl, '_blank')}
+                onError={e => { e.target.style.display = 'none'; }}
+                onContextMenu={async (e) => { 
                      e.preventDefault(); 
                      e.stopPropagation();
                      if (!window.confirm('Save this image to your gallery?')) return;
@@ -853,7 +866,7 @@ export default function ChatPage() {
                        a.download = fname;
                        a.click();
                      }
-                   }} 
+                }} 
               />
             : <span className="msg-text">{msg.text}</span>}
         </div>
