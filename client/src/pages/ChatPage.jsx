@@ -98,8 +98,29 @@ export default function ChatPage() {
     }).catch(() => {});
   }, []);
 
+  /* ── NATIVE AUDIO ROUTING HELPERS (Capacitor Android only) ── */
+  // Routes call audio to earpiece (front speaker) like WhatsApp — works via native Java bridge
+  // On browser/desktop this is safely a no-op
+  const nativeStartEarpiece = useCallback(async () => {
+    try {
+      if (window.Capacitor?.isNativePlatform?.()) {
+        await window.Capacitor.Plugins.AudioRoute.startEarpiece();
+      }
+    } catch (e) { console.warn('AudioRoute.startEarpiece failed:', e); }
+  }, []);
+
+  const nativeStopAudio = useCallback(() => {
+    try {
+      if (window.Capacitor?.isNativePlatform?.()) {
+        window.Capacitor.Plugins.AudioRoute.stopAudio();
+      }
+    } catch (e) { console.warn('AudioRoute.stopAudio failed:', e); }
+  }, []);
+
   /* ── CALL HELPERS ── */
   const endCall = useCallback(() => {
+    // Reset native Android audio mode back to NORMAL before anything else
+    nativeStopAudio();
     activeRef.current = false;
     setShowCall(false);
     setShowIncoming(false);
@@ -110,7 +131,7 @@ export default function ChatPage() {
     if (localVid.current)  localVid.current.srcObject  = null;
     if (remoteVid.current) remoteVid.current.srcObject = null;
     setAudioMuted(false); setVideoOff(false);
-  }, []);
+  }, [nativeStopAudio]);
 
   const getMedia = async type => {
     try {
@@ -131,6 +152,9 @@ export default function ChatPage() {
           frameRate: { ideal: 30   },
         } : false
       });
+      // ★ Immediately set Android audio to IN_COMMUNICATION mode (earpiece)
+      // This must happen right after getUserMedia, before tracks are added to PeerConnection
+      await nativeStartEarpiece();
     } catch (e) {
       alert('Could not access camera/mic: ' + e.message);
       throw e;
@@ -157,27 +181,13 @@ export default function ChatPage() {
     const pc = new RTCPeerConnection(ICE);
     if (localStream.current)
       localStream.current.getTracks().forEach(t => pc.addTrack(t, localStream.current));
-    pc.ontrack = async e => {
+    pc.ontrack = e => {
       if (remoteVid.current) {
         remoteVid.current.srcObject = e.streams[0];
-        // ★ FORCE EARPIECE (front speaker) on Android seamlessly upon connection
-        try {
-          if ('setSinkId' in remoteVid.current) {
-            const devices = await navigator.mediaDevices.enumerateDevices();
-            const outputs = devices.filter(d => d.kind === 'audiooutput');
-            // Look for earpiece in device labels
-            const earpiece = outputs.find(d =>
-              d.label.toLowerCase().includes('earpiece') ||
-              d.label.toLowerCase().includes('phone')
-            );
-            if (earpiece) {
-              await remoteVid.current.setSinkId(earpiece.deviceId);
-            } else if (outputs.length > 0) {
-              // Fallback to exactly 'default' sink (which is usually earpiece for audio calls)
-              await remoteVid.current.setSinkId('default');
-            }
-          }
-        } catch (err) { console.warn('Force Earpiece failed:', err); }
+        // ★ Re-confirm earpiece routing when remote track arrives
+        // (setSinkId is NOT used — it does NOT work in Android WebView)
+        // Audio routing is handled natively via AudioRoutePlugin in MainActivity.java
+        nativeStartEarpiece();
       }
     };
     pc.onicecandidate = e  => { if (e.candidate) socketRef.current?.emit('ice-candidate', e.candidate); };

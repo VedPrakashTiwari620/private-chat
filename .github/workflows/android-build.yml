@@ -1,46 +1,102 @@
-name: Build Android APK
+name: 🤖 Build Android APK
+
+# Trigger: manually from GitHub UI, OR on every push to main
 on:
   push:
-    branches:
-      - main
-  workflow_dispatch:
+    branches: [main]
+  workflow_dispatch:   # ← "Run workflow" button in GitHub Actions tab
 
 jobs:
-  build:
+  build-apk:
+    name: Build Debug APK
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Node.js
+      # ── 1. Checkout code ──────────────────────────────────────────────
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Setup Node.js ──────────────────────────────────────────────
+      - name: 🟢 Setup Node.js 18
         uses: actions/setup-node@v4
         with:
           node-version: 18
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
 
-      - name: Setup Java
+      # ── 3. Setup Java (required for Gradle / Android build) ───────────
+      - name: ☕ Setup Java 17
         uses: actions/setup-java@v4
         with:
-          distribution: "zulu"
-          java-version: "21"
+          distribution: 'zulu'
+          java-version: '17'
 
-      - name: Install dependencies
-        working-directory: ./client
-        run: npm ci || npm install
+      # ── 4. Setup Android SDK ──────────────────────────────────────────
+      - name: 🤖 Setup Android SDK
+        uses: android-actions/setup-android@v3
 
-      - name: Capacitor Sync
+      # ── 5. Create .env file from GitHub Secrets ───────────────────────
+      #    Go to: GitHub repo → Settings → Secrets and variables → Actions
+      #    Add these 3 secrets: VITE_USER1_UID, VITE_USER2_UID, VITE_AES_SECRET
+      - name: 🔐 Create .env file from secrets
         working-directory: ./client
         run: |
-          mkdir -p dist
-          echo '<!DOCTYPE html><html><body>Loading...</body></html>' > dist/index.html
-          npx cap sync android
+          cat > .env << EOF
+          VITE_USER1_UID=${{ secrets.VITE_USER1_UID }}
+          VITE_USER2_UID=${{ secrets.VITE_USER2_UID }}
+          VITE_AES_SECRET=${{ secrets.VITE_AES_SECRET }}
+          EOF
+          echo "✅ .env file created"
 
-      - name: Build APK
+      # ── 6. Install client npm packages ────────────────────────────────
+      - name: 📦 Install client dependencies
+        working-directory: ./client
+        run: npm ci
+
+      # ── 7. Build React app → outputs to ../public/ ────────────────────
+      - name: ⚛️ Build React app (Vite)
+        working-directory: ./client
+        run: npm run build
+
+      # ── 8. Sync built web assets into Android project ─────────────────
+      - name: 🔄 Capacitor sync → Android
+        working-directory: ./client
+        run: npx cap sync android
+
+      # ── 9. Make Gradle wrapper executable ────────────────────────────
+      - name: 🔧 Grant Gradle execute permission
         working-directory: ./client/android
-        run: |
-          chmod +x ./gradlew
-          ./gradlew assembleDebug
+        run: chmod +x ./gradlew
 
-      - name: Upload APK
+      # ── 10. Build Debug APK ────────────────────────────────────────────
+      - name: 🏗️ Build Debug APK
+        working-directory: ./client/android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+
+      # ── 11. Upload APK as downloadable artifact ────────────────────────
+      - name: 📤 Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: GCap-Bank-App
+          name: GCapBank-App-v${{ github.run_number }}
           path: client/android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30   # APK available for 30 days to download
+          if-no-files-found: error
+
+      # ── 12. Print download reminder ───────────────────────────────────
+      - name: ✅ Build complete — download instructions
+        run: |
+          echo "=============================================="
+          echo "  APK BUILD SUCCESSFUL!"
+          echo "=============================================="
+          echo ""
+          echo "  To download your APK:"
+          echo "  1. Go to GitHub → Actions tab"
+          echo "  2. Click this workflow run"
+          echo "  3. Scroll down to 'Artifacts' section"
+          echo "  4. Click 'GCapBank-App-v${{ github.run_number }}' to download"
+          echo "  5. Unzip → transfer app-debug.apk to phone"
+          echo "  6. On phone: Settings → Install Unknown Apps → Allow"
+          echo ""
+          echo "=============================================="
