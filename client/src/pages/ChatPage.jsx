@@ -13,17 +13,16 @@ import { auth, db, storage } from '../firebase.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatTime, formatLastSeen } from '../utils/helpers.js';
 
-// ICE config with STUN + reliable TURN servers for NAT traversal (mobile data / symmetric NAT)
+// ICE config with STUN + free TURN servers for NAT traversal
+// Uses openrelay (Metered.ca legacy free) + numb.viagenie.ca as fallbacks
 const ICE = { iceServers: [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
-  { urls: 'stun:stun.relay.metered.ca:80' },
-  // Metered.ca global TURN servers — most reliable free option
-  { urls: 'turn:global.relay.metered.ca:80',              username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:global.relay.metered.ca:80?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turn:global.relay.metered.ca:443',             username: 'openrelayproject', credential: 'openrelayproject' },
-  { urls: 'turns:global.relay.metered.ca:443?transport=tcp',username: 'openrelayproject', credential: 'openrelayproject' },
-  // Extra fallback TURN
+  { urls: 'stun:stun2.l.google.com:19302' },
+  // numb.viagenie.ca — reliable public free TURN
+  { urls: 'turn:numb.viagenie.ca',         username: 'webrtc@live.com',     credential: 'muazkh' },
+  // Metered.ca openrelay — legacy free TURN servers
+  { urls: 'turn:openrelay.metered.ca:80',  username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
   { urls: 'turns:openrelay.metered.ca:443',username: 'openrelayproject', credential: 'openrelayproject' },
 ]};
@@ -45,6 +44,7 @@ export default function ChatPage() {
   const [callType,     setCallType]     = useState(null);
   const [audioMuted,      setAudioMuted]      = useState(false);
   const [videoOff,        setVideoOff]        = useState(false);
+  const [speakerOn,       setSpeakerOn]       = useState(true);  // ★ loudspeaker ON by default
   const [showCamera,      setShowCamera]      = useState(false);
   const [facingMode,      setFacingMode]      = useState('environment');
   const [callStatus,      setCallStatus]      = useState('ringing');
@@ -118,7 +118,12 @@ export default function ChatPage() {
   /* ── NATIVE PLUGIN HELPERS (Capacitor Android only — safe no-op on browser) ── */
   const nativePlugin = () => window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins.AudioRoute : null;
 
-  // Route audio to earpiece (front speaker) like WhatsApp
+  // ★ Route audio to SPEAKERPHONE (front/loudspeaker) — default for calls
+  const nativeStartSpeaker = useCallback(async () => {
+    try { await nativePlugin()?.startSpeaker(); } catch (e) { console.warn('startSpeaker:', e); }
+  }, []);
+
+  // Route audio to earpiece (small top speaker) — used when user toggles speaker off
   const nativeStartEarpiece = useCallback(async () => {
     try { await nativePlugin()?.startEarpiece(); } catch (e) { console.warn('startEarpiece:', e); }
   }, []);
@@ -159,6 +164,7 @@ export default function ChatPage() {
     setCallCamFacing('user');
     setNativeCallActive(false);
     audioMutedRef.current = false;
+    setSpeakerOn(true); // ★ reset speaker to ON for next call
     if (pcRef.current)       { pcRef.current.close(); pcRef.current = null; }
     if (localStream.current) { localStream.current.getTracks().forEach(t => t.stop()); localStream.current = null; }
     if (localVid.current)    localVid.current.srcObject  = null;
@@ -169,15 +175,12 @@ export default function ChatPage() {
   const getMedia = async type => {
     try {
       localStream.current = await navigator.mediaDevices.getUserMedia({
-        // HD audio with noise/echo suppression
+        // Audio with noise/echo suppression — no sampleRate constraint (causes failure on some Android)
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl:  true,
-          sampleRate:       48000,
         },
-        // ★ No fixed 1280x720 — avoids zoom/crop on mobile portrait
-        // ★ 720p landscape — reliable on all phones, no portrait issue
         video: type === 'video' ? {
           facingMode: 'user',
           width:     { ideal: 1280 },
@@ -185,9 +188,8 @@ export default function ChatPage() {
           frameRate: { ideal: 30   },
         } : false
       });
-      // ★ Immediately set Android audio to IN_COMMUNICATION mode (earpiece)
-      // This must happen right after getUserMedia, before tracks are added to PeerConnection
-      await nativeStartEarpiece();
+      // ★ Default to LOUDSPEAKER mode so audio is clearly audible without holding phone to ear
+      await nativeStartSpeaker();
     } catch (e) {
       alert('Could not access camera/mic: ' + e.message);
       throw e;
@@ -217,10 +219,8 @@ export default function ChatPage() {
     pc.ontrack = e => {
       if (remoteVid.current) {
         remoteVid.current.srcObject = e.streams[0];
-        // ★ Re-confirm earpiece routing when remote track arrives
-        // (setSinkId is NOT used — it does NOT work in Android WebView)
-        // Audio routing is handled natively via AudioRoutePlugin in MainActivity.java
-        nativeStartEarpiece();
+        // ★ Re-confirm speakerphone routing when remote track arrives
+        nativeStartSpeaker();
       }
     };
     pc.onicecandidate = e  => { if (e.candidate) socketRef.current?.emit('ice-candidate', e.candidate); };
@@ -1000,6 +1000,15 @@ export default function ChatPage() {
                 <div className="call-controls" style={{ position:'static', transform:'none' }}>
                   <button onClick={toggleMute}   title={audioMuted||nativeCallActive?'Unmute':'Mute'} style={{ background: (audioMuted||nativeCallActive) ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}>
                     <i className={`fas fa-microphone${(audioMuted||nativeCallActive)?'-slash':''}`} />
+                  </button>
+                  {/* ★ Speaker toggle — tap to switch between loudspeaker and earpiece */}
+                  <button onClick={async () => {
+                    const next = !speakerOn;
+                    setSpeakerOn(next);
+                    if (next) await nativeStartSpeaker(); else await nativeStartEarpiece();
+                  }} title={speakerOn ? 'Switch to Earpiece' : 'Switch to Speaker'}
+                    style={{ background: speakerOn ? 'rgba(0,200,100,0.7)' : 'rgba(255,255,255,0.2)' }}>
+                    <i className={`fas fa-volume-${speakerOn ? 'up' : 'off'}`} />
                   </button>
                   {callType==='video' && <button onClick={toggleVideo} title={videoOff?'Cam On':'Cam Off'} style={{ background: videoOff ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}><i className={`fas fa-video${videoOff?'-slash':''}`} /></button>}
                   {callType === 'video' && (
