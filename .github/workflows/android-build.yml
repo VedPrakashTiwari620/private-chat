@@ -53,7 +53,7 @@ jobs:
       # ── 6. Install client npm packages ────────────────────────────────
       - name: 📦 Install client dependencies
         working-directory: ./client
-        run: npm ci
+        run: npm install
 
       # ── 7. Build React app → dist/ (what Capacitor's webDir expects) ──
       # Note: vite.config.js normally outputs to ../public for the server,
