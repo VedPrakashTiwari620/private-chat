@@ -11,11 +11,12 @@
         android:hardwareAccelerated="true">
 
         <activity
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density|pictureInPicture"
             android:name=".MainActivity"
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
+            android:supportsPictureInPicture="true"
             android:exported="true">
 
             <intent-filter>
@@ -24,6 +25,12 @@
             </intent-filter>
 
         </activity>
+
+        <!-- Foreground call service — keeps app alive in background during calls -->
+        <service
+            android:name=".ForegroundCallService"
+            android:foregroundServiceType="phoneCall"
+            android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"
@@ -55,6 +62,19 @@
 
     <!-- Vibrate — Incoming call ring -->
     <uses-permission android:name="android.permission.VIBRATE" />
+
+    <!-- Foreground Service — keeps call alive in background (PiP + minimize) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+
+    <!-- Notifications — required on Android 13+ to show call notification -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Sensors — proximity sensor for screen-off near ear -->
+    <uses-permission android:name="android.permission.SENSOR_PERMISSION" />
+
+    <!-- Wake Lock — proximity screen-off wake lock -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Gallery save — needed only on Android < 10 (API < 29) -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"

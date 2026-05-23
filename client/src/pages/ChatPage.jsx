@@ -37,15 +37,17 @@ export default function ChatPage() {
   const [callType,     setCallType]     = useState(null);
   const [audioMuted,      setAudioMuted]      = useState(false);
   const [videoOff,        setVideoOff]        = useState(false);
+  const [speakerOn,       setSpeakerOn]       = useState(false); // ★ false = earpiece (default like WhatsApp)
   const [showCamera,      setShowCamera]      = useState(false);
   const [facingMode,      setFacingMode]      = useState('environment');
   const [callStatus,      setCallStatus]      = useState('ringing');
   const [callCamFacing,   setCallCamFacing]   = useState('user');
   const [callDuration,    setCallDuration]    = useState(0);
   const [pTyping,         setPTyping]         = useState(false);
-  const [nativeCallActive, setNativeCallActive] = useState(false); // native phone call in progress
-  const [callMinimized,   setCallMinimized]   = useState(false);  // ★ call running but UI hidden (WhatsApp-style)
-  const [remoteHeld,      setRemoteHeld]      = useState(false);  // ★ remote user answered native call → show HOLD
+  const [nativeCallActive, setNativeCallActive] = useState(false);
+  const [callMinimized,   setCallMinimized]   = useState(false);
+  const [remoteHeld,      setRemoteHeld]      = useState(false);
+  const [inPiP,           setInPiP]           = useState(false); // ★ PiP floating window active
 
   /* ── CALL TIMER LOGIC ── */
   const timerRef = useRef(null);
@@ -112,11 +114,16 @@ export default function ChatPage() {
   /* ── NATIVE PLUGIN HELPERS (Capacitor Android only — safe no-op on browser) ── */
   const nativePlugin = () => window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins.AudioRoute : null;
 
-  // ★ Route audio to earpiece (front speaker) — like a regular phone call
-  // IMPORTANT: Must be called 800ms AFTER Agora publishes, not before.
-  // Calling too early gets overridden by Agora's audio session initialization.
+  // ★ Route audio to EARPIECE (front speaker) — call BEFORE join() per Agora guide
+  // Equivalent to setDefaultAudioRouteToSpeakerphone(false) in native Agora SDK
   const nativeStartEarpiece = useCallback(() => {
     try { nativePlugin()?.startEarpiece(); } catch (e) { console.warn('startEarpiece:', e); }
+  }, []);
+
+  // ★ Route audio to SPEAKERPHONE — called when user taps speaker toggle
+  // Equivalent to setEnableSpeakerphone(true) in native Agora SDK
+  const nativeStartSpeaker = useCallback(() => {
+    try { nativePlugin()?.startSpeaker(); } catch (e) { console.warn('startSpeaker:', e); }
   }, []);
 
   // Reset audio mode after call
@@ -158,14 +165,21 @@ export default function ChatPage() {
   const endCall = useCallback(async () => {
     nativeStopRingtone();
     nativeStopAudio();
+    // Tell native: call ended
+    try { nativePlugin()?.setCallActive({ active: false }); } catch {}
+    try { nativePlugin()?.stopForegroundService(); } catch {}
+    try { nativePlugin()?.stopProximitySensor(); } catch {}
+    try { nativePlugin()?.abandonAudioFocus(); } catch {}
     activeRef.current = false;
     setShowCall(false);
     setShowIncoming(false);
     setCallStatus('ringing');
     setCallCamFacing('user');
     setNativeCallActive(false);
-    setCallMinimized(false); // ★ reset minimize state
-    setRemoteHeld(false);    // ★ reset hold state
+    setCallMinimized(false);
+    setRemoteHeld(false);
+    setInPiP(false);
+    setSpeakerOn(false);
     audioMutedRef.current = false;
     await agoraLeave();
     if (localVid.current)  localVid.current.srcObject  = null;
@@ -189,7 +203,7 @@ export default function ChatPage() {
           }
           if (mediaType === 'audio') {
             user.audioTrack.play();
-            // ★ Re-confirm earpiece routing when remote audio arrives (also with delay)
+            // ★ Re-confirm routing after remote audio arrives (800ms delay as safety net)
             setTimeout(() => nativeStartEarpiece(), 800);
           }
         } catch (e) { console.warn('Agora subscribe error:', e); }
@@ -219,16 +233,30 @@ export default function ChatPage() {
         });
       }
 
+      // ★ STEP 1: Request audio focus BEFORE join (ducks music, ensures voice comm priority)
+      try { await nativePlugin()?.requestAudioFocus(); } catch {}
+
       // UID: user1=1, user2=2 (unique integers per channel)
       const uid = role === 'user1' ? 1 : 2;
+
+      // ★ STEP 2: Set earpiece BEFORE join() — setDefaultAudioRouteToSpeakerphone(false) equivalent
+      nativeStartEarpiece();
+
       await agoraClient.current.join(AGORA_APP_ID, AGORA_CHANNEL, null, uid);
 
       const tracks = [localAudioTrack.current, localVideoTrack.current].filter(Boolean);
       await agoraClient.current.publish(tracks);
 
-      // ★ Route to front earpiece (front speaker) with 800ms delay.
-      // Delay is required: Agora's audio engine finishes initializing ~300-500ms after publish().
-      // Calling setSpeakerphoneOn too early gets overridden by Agora's internal audio setup.
+      // ★ STEP 3: Tell MainActivity call is active (PiP auto-trigger on Home press)
+      try { nativePlugin()?.setCallActive({ active: true }); } catch {}
+
+      // ★ STEP 4: Start foreground service — persistent notification + keeps app alive
+      try { nativePlugin()?.startForegroundService({ callType: type }); } catch {}
+
+      // ★ STEP 5: Enable proximity sensor — screen off when near ear
+      try { nativePlugin()?.startProximitySensor(); } catch {}
+
+      // ★ STEP 6: Re-confirm earpiece 800ms after publish (Agora audio fully ready)
       setTimeout(() => nativeStartEarpiece(), 800);
 
       // Show local video preview
@@ -430,8 +458,19 @@ export default function ChatPage() {
     }
 
     // ★ Native phone call state — auto-mute WebRTC when native call arrives
-    let nativeCallSub = null;
+    // ★ "End Call" from notification button → end the call from JS side
+    let notifEndSub = null;
     const plugin = nativePlugin();
+    if (plugin?.addListener) {
+      Promise.resolve(
+        plugin.addListener('callEndedFromNotification', () => {
+          if (activeRef.current) endCall();
+        })
+      ).then(h => { notifEndSub = h; }).catch(() => {});
+    }
+
+    // Native phone call state listener (GSM → mute Agora)
+    let nativeCallSub = null;
     if (plugin?.addListener) {
       // Capacitor native addListener() can return EITHER:
       //   a) Promise<PluginListenerHandle>  (web/PWA)
@@ -461,13 +500,32 @@ export default function ChatPage() {
     document.addEventListener('visibilitychange', handleVis);
     window.addEventListener('beforeunload', () => writeMyPresence(false));
 
-    // Android hardware back button:
-    // ★ During active call — minimize call (keep Agora running), show floating banner in chat
-    // ★ Otherwise — navigate to select screen
+    // ★ PiP state listener: MainActivity notifies JS when PiP starts/ends
+    const handlePiP = (e) => {
+      const isInPiP = e.detail?.inPiP ?? false;
+      setInPiP(isInPiP);
+      if (!isInPiP && activeRef.current) {
+        // PiP exited — restore full call screen
+        setShowCall(true);
+        setCallMinimized(false);
+      }
+    };
+    window.addEventListener('pip-state', handlePiP);
+
+    // Android hardware back button
+    // ★ FIX: Use activeRef (not showCall state) to avoid stale closure bug
+    // showCall captured in closure would always be false (initial value)
     const handleBackBtn = () => {
-      if (activeRef.current && showCall) {
-        setShowCall(false);       // hide full-screen call overlay
-        setCallMinimized(true);   // show floating mini banner in chat
+      if (activeRef.current) {
+        // Call is active — for video calls: enter PiP; for audio: minimize with banner
+        if (callTypeRef.current === 'video') {
+          // Try native PiP first (Android 8+), fallback to JS minimize
+          try {
+            nativePlugin()?.enterPiP();
+          } catch {}
+        }
+        setShowCall(false);
+        setCallMinimized(true);
       } else {
         navigate('/select', { replace: true });
       }
@@ -479,12 +537,14 @@ export default function ChatPage() {
       unsubMsg();
       unsubTyping();
       nativeCallSub?.remove?.();
+      notifEndSub?.remove?.();
       endCall();
       writeTyping(false);
       clearTimeout(typingTimerRef.current);
       writeMyPresence(false);
       document.removeEventListener('visibilitychange', handleVis);
       document.removeEventListener('backbutton', handleBackBtn, false);
+      window.removeEventListener('pip-state', handlePiP);
     };
   }, [role]);
 
@@ -1033,29 +1093,57 @@ export default function ChatPage() {
               <video id="remote-video" ref={remoteVid} autoPlay playsInline style={{ display: callType==='audio'?'none':'block' }} />
               <video id="local-video"  ref={localVid}  autoPlay playsInline muted  style={{ display: callType==='audio'?'none':'block', transform: callCamFacing === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }} />
 
-              {/* ─── CONNECTED: controls ─── */}
-              {callStatus === 'connected' && (
+              {/* ★ PiP MODE: show only video feeds, hide all controls/text */}
+              {inPiP && (
+                <div style={{ position:'absolute', inset:0, zIndex:30, display:'flex', alignItems:'center', justifyContent:'center', background:'#000' }}>
+                  <video ref={remoteVid} autoPlay playsInline style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                </div>
+              )}
+
+              {/* ★ CONNECTED CONTROLS — hidden during PiP */}
+              {callStatus === 'connected' && !inPiP && (
                 <div style={{ display:'flex', flexDirection:'column', alignItems:'center', gap:10, position:'absolute', bottom:20, left:'50%', transform:'translateX(-50%)', zIndex:10, width:'100%' }}>
                   <div style={{ background:'rgba(0,0,0,0.4)', padding:'4px 12px', borderRadius:16, fontSize:13, color:'#fff', marginBottom:-5, fontWeight:500, border:'1px solid rgba(255,255,255,0.1)' }}>
                     {formatDuration(callDuration)}
                   </div>
                   <div className="call-controls" style={{ position:'static', transform:'none' }}>
+
+                    {/* Mute mic */}
                     <button onClick={toggleMute} title={audioMuted||nativeCallActive?'Unmute':'Mute'}
                       style={{ background: (audioMuted||nativeCallActive) ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}>
                       <i className={`fas fa-microphone${(audioMuted||nativeCallActive)?'-slash':''}`} />
                     </button>
+
+                    {/* ★ Speaker toggle — earpiece (default) ↔ loudspeaker */}
+                    <button
+                      onClick={() => {
+                        const next = !speakerOn;
+                        setSpeakerOn(next);
+                        if (next) nativeStartSpeaker(); else nativeStartEarpiece();
+                      }}
+                      title={speakerOn ? 'Switch to Earpiece' : 'Switch to Loudspeaker'}
+                      style={{ background: speakerOn ? 'rgba(0,200,100,0.75)' : 'rgba(255,255,255,0.2)' }}
+                    >
+                      <i className={`fas fa-volume-${speakerOn ? 'up' : 'off'}`} />
+                    </button>
+
+                    {/* Video mute */}
                     {callType==='video' && (
                       <button onClick={toggleVideo} title={videoOff?'Cam On':'Cam Off'}
                         style={{ background: videoOff ? 'rgba(234,0,56,0.8)' : 'rgba(255,255,255,0.2)' }}>
                         <i className={`fas fa-video${videoOff?'-slash':''}`} />
                       </button>
                     )}
+
+                    {/* Camera flip */}
                     {callType === 'video' && (
                       <button onClick={toggleCallCamera} title={callCamFacing==='user'?'Rear Camera':'Front Camera'}
                         style={{ background:'rgba(255,255,255,0.2)' }}>
                         <i className="fas fa-sync-alt" />
                       </button>
                     )}
+
+                    {/* End call */}
                     <button id="end-call" className="danger" onClick={endCallClick}>
                       <i className="fas fa-phone-slash" />
                     </button>
