@@ -14,15 +14,14 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.media.AudioAttributes;
-import android.media.AudioFocusRequest;
 import android.media.AudioManager;
 import android.media.MediaScannerConnection;
 import android.media.Ringtone;
 import android.media.RingtoneManager;
 import android.net.Uri;
+import android.media.AudioFocusRequest;
 import android.os.Build;
 import android.os.Environment;
-import android.os.PowerManager;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
@@ -80,11 +79,10 @@ public class AudioRoutePlugin extends Plugin {
     private TelephonyCallback modernPhoneCallback;
     private boolean phoneListenerRegistered = false;
 
-    // ── Proximity sensor ──────────────────────────────────────────────────────
+    // ── Proximity sensor ────────────────────────────────────────────────────
     private SensorManager sensorManager;
     private Sensor proximitySensor;
     private SensorEventListener proximityListener;
-    private PowerManager.WakeLock proximityWakeLock;
     private boolean proximitySensorActive = false;
 
     // ── Audio focus ───────────────────────────────────────────────────────────
@@ -250,16 +248,10 @@ public class AudioRoutePlugin extends Plugin {
             }
             proximitySensor = sensorManager.getDefaultSensor(Sensor.TYPE_PROXIMITY);
             if (proximitySensor == null) {
-                call.reject("Proximity sensor not available");
+                // Proximity sensor not available on this device — resolve gracefully
+                call.resolve();
                 return;
             }
-
-            // Acquire a proximity wake lock — dims screen when near
-            PowerManager pm = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
-            //noinspection deprecation
-            proximityWakeLock = pm.newWakeLock(
-                    0x00000020, // PowerManager.PROXIMITY_SCREEN_OFF_WAKE_LOCK
-                    "GCapBank:ProximityWakeLock");
 
             proximityListener = new SensorEventListener() {
                 @Override
@@ -267,19 +259,7 @@ public class AudioRoutePlugin extends Plugin {
                     float distance = event.values[0];
                     float maxRange = proximitySensor.getMaximumRange();
                     boolean near = (distance < maxRange);
-
-                    // Acquire/release proximity wake lock → dims screen near ear
-                    if (near) {
-                        if (proximityWakeLock != null && !proximityWakeLock.isHeld()) {
-                            proximityWakeLock.acquire(10 * 60 * 1000L); // max 10 min
-                        }
-                    } else {
-                        if (proximityWakeLock != null && proximityWakeLock.isHeld()) {
-                            proximityWakeLock.release();
-                        }
-                    }
-
-                    // Notify JS of proximity change
+                    // Notify JS — JS can handle screen dimming via KeepAwake plugin if needed
                     JSObject data = new JSObject();
                     data.put("near", near);
                     data.put("distance", distance);
@@ -293,11 +273,12 @@ public class AudioRoutePlugin extends Plugin {
             proximitySensorActive = true;
             call.resolve();
         } catch (Exception e) {
-            call.reject("startProximitySensor failed: " + e.getMessage());
+            // Non-fatal — proximity sensor failure should not break the call
+            call.resolve();
         }
     }
 
-    /** Disable proximity sensor and release wake lock */
+    /** Disable proximity sensor */
     @PluginMethod
     public void stopProximitySensor(PluginCall call) {
         try {
@@ -305,14 +286,10 @@ public class AudioRoutePlugin extends Plugin {
                 sensorManager.unregisterListener(proximityListener);
                 proximityListener = null;
             }
-            if (proximityWakeLock != null && proximityWakeLock.isHeld()) {
-                proximityWakeLock.release();
-            }
-            proximityWakeLock = null;
             proximitySensorActive = false;
             if (call != null) call.resolve();
         } catch (Exception e) {
-            if (call != null) call.reject("stopProximitySensor failed: " + e.getMessage());
+            if (call != null) call.resolve(); // non-fatal
         }
     }
 

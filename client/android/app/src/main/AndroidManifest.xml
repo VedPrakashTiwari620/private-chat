@@ -27,9 +27,10 @@
         </activity>
 
         <!-- Foreground call service — keeps app alive in background during calls -->
+        <!-- foregroundServiceType=microphone|camera (NOT phoneCall — that requires being default dialer on Android 14+) -->
         <service
             android:name=".ForegroundCallService"
-            android:foregroundServiceType="phoneCall"
+            android:foregroundServiceType="microphone|camera"
             android:exported="false" />
 
         <provider
@@ -63,9 +64,10 @@
     <!-- Vibrate — Incoming call ring -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- Foreground Service — keeps call alive in background (PiP + minimize) -->
+    <!-- Foreground Service — keeps call alive in background -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
 
     <!-- Notifications — required on Android 13+ to show call notification -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
