@@ -11,7 +11,7 @@
         android:hardwareAccelerated="true">
 
         <activity
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density|pictureInPicture"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
             android:name=".MainActivity"
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
@@ -70,11 +70,6 @@
     <!-- Notifications — required on Android 13+ to show call notification -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Sensors — proximity sensor for screen-off near ear -->
-    <uses-permission android:name="android.permission.SENSOR_PERMISSION" />
-
-    <!-- Wake Lock — proximity screen-off wake lock -->
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Gallery save — needed only on Android < 10 (API < 29) -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
