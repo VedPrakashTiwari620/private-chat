@@ -2,7 +2,6 @@ import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext.jsx';
 import LoginPage from './pages/LoginPage.jsx';
-import UserSelectPage from './pages/UserSelectPage.jsx';
 import ChatPage from './pages/ChatPage.jsx';
 import ErrorBoundary from './ErrorBoundary.jsx';
 
@@ -17,10 +16,9 @@ function AppRoutes() {
   );
   return (
     <Routes>
-      <Route path="/login"  element={!authorized ? <LoginPage />      : <Navigate to="/select" replace />} />
-      <Route path="/select" element={ authorized  ? <UserSelectPage /> : <Navigate to="/login"  replace />} />
+      <Route path="/login"  element={!authorized ? <LoginPage />      : <Navigate to="/chat" replace />} />
       <Route path="/chat"   element={ authorized  ? <ChatPage />       : <Navigate to="/login"  replace />} />
-      <Route path="*"       element={<Navigate to={authorized ? '/select' : '/login'} replace />} />
+      <Route path="*"       element={<Navigate to={authorized ? '/chat' : '/login'} replace />} />
     </Routes>
   );
 }

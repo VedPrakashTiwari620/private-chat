@@ -351,7 +351,7 @@ export default function ChatPage() {
 
   /* ── MAIN SETUP ── */
   useEffect(() => {
-    if (!role) { navigate('/select', { replace: true }); return; }
+    if (!role) { navigate('/login', { replace: true }); return; }
 
     // NOTE: Camera/mic permissions are handled automatically by Capacitor's WebView
     // when getUserMedia() is called — do NOT call ActivityCompat.requestPermissions()
@@ -528,11 +528,11 @@ export default function ChatPage() {
 
     // Android hardware back button
     // ★ FIX: Use @capacitor/app to intercept hardware back button natively
-    // This prevents the default WebView history.back() which was navigating to /select
+    // This prevents the default WebView history.back()
     let backSub = null;
     CapApp.addListener('backButton', ({ canGoBack }) => {
-      if (activeRef.current) {
-        // Call is active — for video calls: enter PiP; for audio: minimize with banner
+      if (callTypeRef.current !== null) { // Handle even if ringing or active
+        // Call is active/ringing — for video calls: enter PiP; for audio: minimize with banner
         if (callTypeRef.current === 'video') {
           try {
             nativePlugin()?.enterPiP();

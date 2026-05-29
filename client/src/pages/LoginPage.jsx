@@ -17,8 +17,19 @@ export default function LoginPage() {
     e.preventDefault();
     setError('');
     if (!email || !password) { setError('Please enter your valid Customer NetID and PIN.'); return; }
-    try { await signInWithEmailAndPassword(auth, email, password); }
-    catch { setError('Error: Invalid credentials. Authentication locked.'); }
+    try {
+      const res = await signInWithEmailAndPassword(auth, email, password);
+      const user = res.user;
+      if (user.uid === import.meta.env.VITE_USER1_UID) {
+        localStorage.setItem('userRole', 'user1');
+      } else if (user.uid === import.meta.env.VITE_USER2_UID) {
+        localStorage.setItem('userRole', 'user2');
+      } else {
+        localStorage.setItem('userRole', 'user1'); // fallback
+      }
+    } catch { 
+      setError('Error: Invalid credentials. Authentication locked.'); 
+    }
   };
 
   return (
