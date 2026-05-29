@@ -192,6 +192,7 @@ export default function ChatPage() {
     try { nativePlugin()?.stopProximitySensor(); } catch {}
     try { nativePlugin()?.abandonAudioFocus(); } catch {}
     activeRef.current = false;
+    callTypeRef.current = null;
     setShowCall(false);
     setShowIncoming(false);
     setCallStatus('ringing');
@@ -906,8 +907,14 @@ export default function ChatPage() {
     }
     endCall();
   };
-  const handleLogout = () => { socketRef.current?.disconnect(); writeMyPresence(false); localStorage.removeItem('userRole'); signOut(auth); };
-
+  
+  const handleLogout = () => { 
+    socketRef.current?.emit('clear-fcm-token', { role });
+    socketRef.current?.disconnect(); 
+    writeMyPresence(false); 
+    localStorage.removeItem('userRole'); 
+    signOut(auth); 
+  };
   /* ── TICK ICON ── */
   const TickIcon = ({ msg }) => {
     if (!msg.timestamp) return <i className="fas fa-check msg-tick tick-sending" title="Sending..." />;

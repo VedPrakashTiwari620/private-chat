@@ -151,6 +151,13 @@ io.on('connection', (socket) => {
     }
   });
 
+  socket.on('clear-fcm-token', ({ role }) => {
+    if (role) {
+      fcmTokens.delete(role);
+      console.log(`FCM token cleared for ${role} (logout)`);
+    }
+  });
+
   /* ─── CALL SIGNALING ─── */
   socket.on('initiate-call', (data) => {
     cancelPendingCall();
