@@ -31,6 +31,7 @@ import android.telephony.TelephonyCallback;
 import android.telephony.TelephonyManager;
 import android.util.Base64;
 import android.util.Rational;
+import android.media.ToneGenerator;
 
 import androidx.annotation.RequiresApi;
 import androidx.core.app.ActivityCompat;
@@ -72,6 +73,9 @@ public class AudioRoutePlugin extends Plugin {
     // ── Ringtone ───────────────────────────────────────────────────────────────
     private Ringtone currentRingtone;
     private Vibrator vibrator;
+    
+    // ── Outgoing Tone ────────────────────────────────────────────────────────
+    private ToneGenerator toneGenerator;
 
     // ── Phone state (GSM call detection) ──────────────────────────────────────
     private TelephonyManager telephonyManager;
@@ -451,6 +455,43 @@ public class AudioRoutePlugin extends Plugin {
             if (call != null) call.resolve();
         } catch (Exception e) {
             if (call != null) call.reject("stopRingtone failed: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void playOutgoingRing(PluginCall call) {
+        try {
+            stopOutgoingRingInternal();
+            AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+            am.setMode(AudioManager.MODE_IN_COMMUNICATION);
+            am.setSpeakerphoneOn(false); // Default to earpiece
+            
+            // STREAM_VOICE_CALL ensures it routes to earpiece
+            toneGenerator = new ToneGenerator(AudioManager.STREAM_VOICE_CALL, 100);
+            // TONE_SUP_RINGTONE is the standard telecom ringing sound (tuuu... tuuu...)
+            toneGenerator.startTone(ToneGenerator.TONE_SUP_RINGTONE);
+            
+            call.resolve();
+        } catch (Exception e) {
+            call.reject("playOutgoingRing failed: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void stopOutgoingRing(PluginCall call) {
+        try {
+            stopOutgoingRingInternal();
+            if (call != null) call.resolve();
+        } catch (Exception e) {
+            if (call != null) call.reject("stopOutgoingRing failed: " + e.getMessage());
+        }
+    }
+
+    private void stopOutgoingRingInternal() {
+        if (toneGenerator != null) {
+            toneGenerator.stopTone();
+            toneGenerator.release();
+            toneGenerator = null;
         }
     }
 

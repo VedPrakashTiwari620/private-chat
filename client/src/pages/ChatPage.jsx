@@ -155,6 +155,16 @@ export default function ChatPage() {
     try { nativePlugin()?.stopRingtone(); } catch (e) { console.warn('stopRingtone:', e); }
   }, []);
 
+  // Play standard telecom outgoing ring through earpiece
+  const nativePlayOutgoingRing = useCallback(async () => {
+    try { await nativePlugin()?.playOutgoingRing(); } catch (e) { console.warn('playOutgoingRing:', e); }
+  }, []);
+  
+  // Stop outgoing ring
+  const nativeStopOutgoingRing = useCallback(() => {
+    try { nativePlugin()?.stopOutgoingRing(); } catch (e) { console.warn('stopOutgoingRing:', e); }
+  }, []);
+
   // Save image to phone gallery via native MediaStore
   const nativeSaveImage = useCallback(async (base64, filename) => {
     try {
@@ -178,6 +188,7 @@ export default function ChatPage() {
 
   const endCall = useCallback(async () => {
     nativeStopRingtone();
+    nativeStopOutgoingRing();
     nativeStopAudio();
     // Tell native: call ended
     try { nativePlugin()?.setCallActive({ active: false }); } catch {}
@@ -307,34 +318,39 @@ export default function ChatPage() {
   const handleCallAccepted = useCallback(async () => {
     activeRef.current = true;
     setCallStatus('connected');
+    nativeStopOutgoingRing();
     if (callerRef.current) logCallEvent('started', callTypeRef.current);
-  }, []);
+  }, [nativeStopOutgoingRing]);
 
   const handleCallRejected = useCallback(() => {
+    nativeStopOutgoingRing();
     logCallEvent('missed', callTypeRef.current);
     setCallStatus('declined');
     setTimeout(() => endCall(), 2500);
-  }, [endCall]);
+  }, [endCall, nativeStopOutgoingRing]);
 
   // ★ Server 30s auto-timeout — nobody answered (Scenario 2)
   const handleCallNotAnswered = useCallback(() => {
+    nativeStopOutgoingRing();
     logCallEvent('not_answered', callTypeRef.current);
     setCallStatus('not_answered');
     // Show "Not Answered" on screen for 2.5s then auto-close
     setTimeout(() => endCall(), 2500);
-  }, [endCall]);
+  }, [endCall, nativeStopOutgoingRing]);
 
   // ★ Receiver: close incoming UI when call timed out server-side
   const handleCallWasMissed = useCallback(() => {
+    nativeStopRingtone();
     setShowIncoming(false);
-  }, []);
+  }, [nativeStopRingtone]);
 
   // Caller cancelled before answer
   const handleCallCancelled = useCallback(() => {
     nativeStopRingtone();
+    nativeStopOutgoingRing();
     setShowIncoming(false);
     endCall();
-  }, [endCall, nativeStopRingtone]);
+  }, [endCall, nativeStopRingtone, nativeStopOutgoingRing]);
 
   /* ── TYPING HELPERS ── */
   const writeTyping = useCallback(async (isTyping) => {
@@ -851,6 +867,7 @@ export default function ChatPage() {
       await agoraJoin(type); // ★ join Agora channel + publish tracks
       setShowCall(true);
       socketRef.current?.emit('initiate-call', { caller: currentUser.email, type });
+      nativePlayOutgoingRing();
     } catch (e) {
       callerRef.current = false;
       setShowCall(false);
