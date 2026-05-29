@@ -12,7 +12,7 @@ export default function UserSelectPage() {
   };
 
   const gotoChat = () => {
-    navigate('/chat');
+    navigate('/chat', { replace: true });
   };
 
   return (
