@@ -636,6 +636,24 @@ export default function ChatPage() {
     return () => clearTimeout(t);
   }, [role]);
 
+  // ★ Request required permissions (Camera, Mic) upfront upon login
+  useEffect(() => {
+    const requestPermissionsUpfront = async () => {
+      try {
+        // Prompt Capacitor Camera permission
+        await Camera.requestPermissions();
+        // Prompt WebRTC Mic/Camera permission (Android system dialog)
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+        stream.getTracks().forEach(t => t.stop());
+      } catch (e) {
+        console.warn("Upfront permissions ignored/denied by user:", e);
+      }
+    };
+    // Request permissions 1.5s after chat loads so UI renders first
+    const t = setTimeout(requestPermissionsUpfront, 1500);
+    return () => clearTimeout(t);
+  }, []);
+
   /* ── MESSAGING ── */
   const sendMessage = async () => {
     // Edit mode
@@ -910,10 +928,15 @@ export default function ChatPage() {
   
   const handleLogout = () => { 
     socketRef.current?.emit('clear-fcm-token', { role });
-    socketRef.current?.disconnect(); 
-    writeMyPresence(false); 
-    localStorage.removeItem('userRole'); 
-    signOut(auth); 
+    try { PushNotifications?.removeAllDeliveredNotifications(); } catch {}
+    
+    // Give socket time to send the 'clear-fcm-token' event before disconnecting
+    setTimeout(() => {
+      socketRef.current?.disconnect(); 
+      writeMyPresence(false); 
+      localStorage.removeItem('userRole'); 
+      signOut(auth); 
+    }, 400);
   };
   /* ── TICK ICON ── */
   const TickIcon = ({ msg }) => {
