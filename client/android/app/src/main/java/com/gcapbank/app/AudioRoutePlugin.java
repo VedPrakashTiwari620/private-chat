@@ -14,6 +14,7 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.media.AudioAttributes;
+import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.media.MediaScannerConnection;
 import android.media.Ringtone;
@@ -130,7 +131,7 @@ public class AudioRoutePlugin extends Plugin {
         try {
             AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
             am.setMode(AudioManager.MODE_IN_COMMUNICATION);
-            am.setSpeakerphoneOn(false);
+            setAudioRoute(am, false);
             if (call != null) call.resolve();
         } catch (Exception e) {
             if (call != null) call.reject("startEarpiece failed: " + e.getMessage());
@@ -146,7 +147,7 @@ public class AudioRoutePlugin extends Plugin {
         try {
             AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
             am.setMode(AudioManager.MODE_IN_COMMUNICATION);
-            am.setSpeakerphoneOn(true);
+            setAudioRoute(am, true);
             if (call != null) call.resolve();
         } catch (Exception e) {
             if (call != null) call.reject("startSpeaker failed: " + e.getMessage());
@@ -158,11 +159,35 @@ public class AudioRoutePlugin extends Plugin {
     public void stopAudio(PluginCall call) {
         try {
             AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                am.clearCommunicationDevice();
+            }
             am.setSpeakerphoneOn(false);
             am.setMode(AudioManager.MODE_NORMAL);
             if (call != null) call.resolve();
         } catch (Exception e) {
             if (call != null) call.reject("stopAudio failed: " + e.getMessage());
+        }
+    }
+
+    private void setAudioRoute(AudioManager am, boolean speakerOn) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            AudioDeviceInfo targetDevice = null;
+            for (AudioDeviceInfo device : am.getAvailableCommunicationDevices()) {
+                if (speakerOn && device.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) {
+                    targetDevice = device;
+                    break;
+                } else if (!speakerOn && device.getType() == AudioDeviceInfo.TYPE_BUILTIN_EARPIECE) {
+                    targetDevice = device;
+                    break;
+                }
+            }
+            if (targetDevice != null) {
+                am.setCommunicationDevice(targetDevice);
+            }
+        } else {
+            // Fallback for Android < 12
+            am.setSpeakerphoneOn(speakerOn);
         }
     }
 
@@ -464,7 +489,7 @@ public class AudioRoutePlugin extends Plugin {
             stopOutgoingRingInternal();
             AudioManager am = (AudioManager) getContext().getSystemService(Context.AUDIO_SERVICE);
             am.setMode(AudioManager.MODE_IN_COMMUNICATION);
-            am.setSpeakerphoneOn(false); // Default to earpiece
+            setAudioRoute(am, false); // Default to earpiece
             
             // STREAM_VOICE_CALL ensures it routes to earpiece
             toneGenerator = new ToneGenerator(AudioManager.STREAM_VOICE_CALL, 100);
