@@ -50,6 +50,30 @@ jobs:
           EOF
           echo "✅ .env file created"
 
+      # ── 6. Inject google-services.json (FCM push notifications) ──────────
+      #    HOW TO SET UP:
+      #    1. Firebase Console → Project Settings → General → Android app
+      #       → Download google-services.json
+      #    2. Base64 encode it (run on your PC):
+      #       Windows PowerShell: [Convert]::ToBase64String([IO.File]::ReadAllBytes("google-services.json"))
+      #       Mac/Linux:          base64 google-services.json
+      #    3. GitHub repo → Settings → Secrets and variables → Actions
+      #       → New repository secret
+      #       Name:  GOOGLE_SERVICES_JSON
+      #       Value: <paste the base64 output>
+      - name: 🔥 Inject google-services.json (FCM)
+        if: secrets.GOOGLE_SERVICES_JSON != ''
+        working-directory: ./client/android/app
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+            echo "$GOOGLE_SERVICES_JSON" | base64 --decode > google-services.json
+            echo "✅ google-services.json injected — FCM push notifications enabled"
+          else
+            echo "⚠️  GOOGLE_SERVICES_JSON secret not set — FCM won't work (app will still build)"
+          fi
+
       # ── 6. Install client npm packages ────────────────────────────────
       - name: 📦 Install client dependencies
         working-directory: ./client
@@ -110,4 +134,7 @@ jobs:
           echo "  5. Unzip → transfer app-debug.apk to phone"
           echo "  6. On phone: Settings → Install Unknown Apps → Allow"
           echo ""
+          echo "  FOR FCM PUSH NOTIFICATIONS (app closed = call/message alert):"
+          echo "  1. Add GOOGLE_SERVICES_JSON secret (see workflow step 6 comments)"
+          echo "  2. Add FIREBASE_SERVICE_ACCOUNT to your server env vars"
           echo "=============================================="
