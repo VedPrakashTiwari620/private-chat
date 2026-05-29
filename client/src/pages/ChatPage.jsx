@@ -12,6 +12,7 @@ import { auth, db } from '../firebase.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import { formatTime, formatLastSeen } from '../utils/helpers.js';
 import AgoraRTC from 'agora-rtc-sdk-ng';
+import { App as CapApp } from '@capacitor/app';
 
 // ── Push Notifications (FCM) ─
 const PushNotifications = window.Capacitor?.Plugins?.PushNotifications ?? null;
@@ -526,13 +527,13 @@ export default function ChatPage() {
     window.addEventListener('pip-state', handlePiP);
 
     // Android hardware back button
-    // ★ FIX: Use activeRef (not showCall state) to avoid stale closure bug
-    // showCall captured in closure would always be false (initial value)
-    const handleBackBtn = () => {
+    // ★ FIX: Use @capacitor/app to intercept hardware back button natively
+    // This prevents the default WebView history.back() which was navigating to /select
+    let backSub = null;
+    CapApp.addListener('backButton', ({ canGoBack }) => {
       if (activeRef.current) {
         // Call is active — for video calls: enter PiP; for audio: minimize with banner
         if (callTypeRef.current === 'video') {
-          // Try native PiP first (Android 8+), fallback to JS minimize
           try {
             nativePlugin()?.enterPiP();
           } catch {}
@@ -540,10 +541,14 @@ export default function ChatPage() {
         setShowCall(false);
         setCallMinimized(true);
       } else {
-        navigate('/select', { replace: true });
+        // Not in call — allow exit or navigation
+        if (canGoBack) {
+          window.history.back();
+        } else {
+          CapApp.exitApp();
+        }
       }
-    };
-    document.addEventListener('backbutton', handleBackBtn, false);
+    }).then(sub => backSub = sub);
 
     return () => {
       socket.disconnect();
@@ -556,7 +561,7 @@ export default function ChatPage() {
       clearTimeout(typingTimerRef.current);
       writeMyPresence(false);
       document.removeEventListener('visibilitychange', handleVis);
-      document.removeEventListener('backbutton', handleBackBtn, false);
+      if (backSub) backSub.remove();
       window.removeEventListener('pip-state', handlePiP);
     };
   }, [role]);
