@@ -13,6 +13,7 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { formatTime, formatLastSeen } from '../utils/helpers.js';
 import AgoraRTC from 'agora-rtc-sdk-ng';
 import { App as CapApp } from '@capacitor/app';
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
 
 // ── Push Notifications (FCM) ─
 const PushNotifications = window.Capacitor?.Plugins?.PushNotifications ?? null;
@@ -42,8 +43,6 @@ export default function ChatPage() {
   const [audioMuted,      setAudioMuted]      = useState(false);
   const [videoOff,        setVideoOff]        = useState(false);
   const [speakerOn,       setSpeakerOn]       = useState(false);
-  const [showCamera,      setShowCamera]      = useState(false);
-  const [facingMode,      setFacingMode]      = useState('environment');
   const [callStatus,      setCallStatus]      = useState('ringing');
   const [callCamFacing,   setCallCamFacing]   = useState('user');
   const [callDuration,    setCallDuration]    = useState(0);
@@ -87,14 +86,11 @@ export default function ChatPage() {
   const agoraClient      = useRef(null);  // Agora RTC client (replaces RTCPeerConnection)
   const localAudioTrack  = useRef(null);  // Agora local mic track
   const localVideoTrack  = useRef(null);  // Agora local camera track
-  const camStream        = useRef(null);
   const callTypeRef      = useRef(null);
   const callerRef        = useRef(false);
   const activeRef        = useRef(false);
   const localVid         = useRef(null);
   const remoteVid        = useRef(null);
-  const camPreview       = useRef(null);
-  const camCanvas        = useRef(null);
   const galleryInput     = useRef(null);
   const msgEnd           = useRef(null);
   const typingTimerRef   = useRef(null);
@@ -798,63 +794,26 @@ export default function ChatPage() {
 
   /* ── CAMERA ── */
   const openCamera = async () => {
-    setShowCamera(true);
     try {
-      if (camStream.current) camStream.current.getTracks().forEach(t => t.stop());
-      // ★ 1080p — works on all phones (back & front), 4K caused failures
-      camStream.current = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: facingMode },
-          width:  { ideal: 1920 },
-          height: { ideal: 1080 },
-        }
+      const image = await Camera.getPhoto({
+        quality: 70, // 70% quality reduces size to avoid 1MB AES Firestore limit
+        allowEditing: false,
+        resultType: CameraResultType.Base64,
+        source: CameraSource.Camera,
+        width: 1000 // Pre-resize to max 1000px natively!
       });
-      if (camPreview.current) camPreview.current.srcObject = camStream.current;
-    } catch { setShowCamera(false); alert('Camera access denied.'); }
-  };
-
-  const closeCamera = () => {
-    camStream.current?.getTracks().forEach(t => t.stop());
-    camStream.current = null; setShowCamera(false);
-  };
-
-  const switchCamera = () => {
-    const next = facingMode === 'environment' ? 'user' : 'environment';
-    setFacingMode(next);
-    camStream.current?.getTracks().forEach(t => t.stop());
-    setTimeout(async () => {
-      try {
-        // ★ 1080p for both cameras
-        camStream.current = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: { ideal: next }, width: { ideal: 1920 }, height: { ideal: 1080 } }
-        });
-        if (camPreview.current) camPreview.current.srcObject = camStream.current;
-      } catch {}
-    }, 100);
-  };
-
-  const takePhoto = () => {
-    if (!camStream.current || !camPreview.current) return;
-    const canvas = camCanvas.current;
-    
-    // Aggressive resize engine (same as gallery) to avoid 1MB AES Firestore crash
-    const MAX = 800;
-    let w = camPreview.current.videoWidth;
-    let h = camPreview.current.videoHeight;
-    
-    if (w > h && w > MAX) { h = Math.round(h * MAX / w); w = MAX; }
-    else if (h > MAX)     { w = Math.round(w * MAX / h); h = MAX; }
-    
-    canvas.width  = w;
-    canvas.height = h;
-    const ctx = canvas.getContext('2d');
-    
-    // Artificial Exposure / Brightness boost for low-light WebRTC capture
-    ctx.filter = 'brightness(1.2) contrast(1.1)';
-    ctx.drawImage(camPreview.current, 0, 0, w, h);
-    
-    closeCamera();
-    sendImage(canvas.toDataURL('image/jpeg', 0.75));
+      
+      const b64 = 'data:image/jpeg;base64,' + image.base64String;
+      
+      // Save locally to gallery via our native plugin
+      const timestamp = new Date().getTime();
+      nativeSaveImage(image.base64String, `IMG_${timestamp}.jpg`);
+      
+      // Send directly to chat
+      sendImage(b64);
+    } catch (e) {
+      console.warn("Camera cancelled or failed: ", e);
+    }
   };
 
   /* ── CALLS ── */
@@ -1383,18 +1342,7 @@ export default function ChatPage() {
         </div>
       )}
 
-      {/* ── CAMERA MODAL ── */}
-      {showCamera && (
-        <div style={{ display:'flex', position:'fixed', top:0, left:0, width:'100%', height:'100%', background:'#000', zIndex:3000, flexDirection:'column' }}>
-          <video ref={camPreview} autoPlay playsInline style={{ flex:1, width:'100%', height:'calc(100% - 120px)', objectFit:'cover', transform: facingMode === 'user' ? 'scaleX(-1)' : 'scaleX(1)' }} />
-          <div style={{ position:'absolute', bottom:0, left:0, width:'100%', height:120, display:'flex', justifyContent:'space-around', alignItems:'center', background:'linear-gradient(transparent,rgba(0,0,0,0.9))', paddingBottom:'max(10px,env(safe-area-inset-bottom))' }}>
-            <button onClick={closeCamera}  style={{ background:'rgba(255,255,255,0.2)', width:50, height:50, borderRadius:'50%', color:'white', border:'none', fontSize:20, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'none' }}><i className="fas fa-times" /></button>
-            <button onClick={takePhoto}    style={{ background:'white', width:70, height:70, borderRadius:'50%', border:'6px solid rgba(255,255,255,0.5)', cursor:'pointer', boxShadow:'none' }} />
-            <button onClick={switchCamera} style={{ background:'rgba(255,255,255,0.2)', width:50, height:50, borderRadius:'50%', color:'white', border:'none', fontSize:20, display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'none' }}><i className="fas fa-sync-alt" /></button>
-          </div>
-          <canvas ref={camCanvas} style={{ display:'none' }} />
-        </div>
-      )}
+
 
       {/* ★ CONTEXT MENU — long press / right click on message */}
       {ctxMenu && (
