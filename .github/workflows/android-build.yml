@@ -62,7 +62,6 @@ jobs:
       #       Name:  GOOGLE_SERVICES_JSON
       #       Value: <paste the base64 output>
       - name: 🔥 Inject google-services.json (FCM)
-        if: secrets.GOOGLE_SERVICES_JSON != ''
         working-directory: ./client/android/app
         env:
           GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
