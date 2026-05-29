@@ -33,6 +33,16 @@
             android:foregroundServiceType="microphone|camera"
             android:exported="false" />
 
+        <!-- FCM message handler — receives push notifications when app is killed/background -->
+        <!-- NOTE: Requires google-services.json in android/app/ and firebase-messaging dependency -->
+        <service
+            android:name=".CallNotificationService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -71,6 +81,9 @@
 
     <!-- Notifications — required on Android 13+ to show call notification -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Full-screen intents (incoming call on lock screen) — Android 12+ -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
 
     <!-- Gallery save — needed only on Android < 10 (API < 29) -->

@@ -13,6 +13,9 @@ import { useAuth } from '../context/AuthContext.jsx';
 import { formatTime, formatLastSeen } from '../utils/helpers.js';
 import AgoraRTC from 'agora-rtc-sdk-ng';
 
+// ── Push Notifications (FCM) ─
+const PushNotifications = window.Capacitor?.Plugins?.PushNotifications ?? null;
+
 // Agora.io — 10,000 free minutes/month, resets monthly
 // Works across ALL networks: WiFi, mobile data, different cities, different countries
 const AGORA_APP_ID  = import.meta.env.VITE_AGORA_APP_ID || '82d2a689a7a34616a90ffd778665e86a';
@@ -34,10 +37,10 @@ export default function ChatPage() {
   const [showCall,     setShowCall]     = useState(false);
   const [showIncoming, setShowIncoming] = useState(false);
   const [incomingData, setIncomingData] = useState(null);
-  const [callType,     setCallType]     = useState(null);
+  const [callType,        setCallType]        = useState(null);
   const [audioMuted,      setAudioMuted]      = useState(false);
   const [videoOff,        setVideoOff]        = useState(false);
-  const [speakerOn,       setSpeakerOn]       = useState(false); // ★ false = earpiece (default like WhatsApp)
+  const [speakerOn,       setSpeakerOn]       = useState(false);
   const [showCamera,      setShowCamera]      = useState(false);
   const [facingMode,      setFacingMode]      = useState('environment');
   const [callStatus,      setCallStatus]      = useState('ringing');
@@ -47,7 +50,17 @@ export default function ChatPage() {
   const [nativeCallActive, setNativeCallActive] = useState(false);
   const [callMinimized,   setCallMinimized]   = useState(false);
   const [remoteHeld,      setRemoteHeld]      = useState(false);
-  const [inPiP,           setInPiP]           = useState(false); // ★ PiP floating window active
+  const [inPiP,           setInPiP]           = useState(false);
+
+  // ★ Signal features
+  const [replyTo,         setReplyTo]         = useState(null);  // message being replied to
+  const [editingMsg,      setEditingMsg]       = useState(null);  // message being edited
+  const [searchQuery,     setSearchQuery]     = useState('');
+  const [searchMode,      setSearchMode]      = useState(false);
+  const [ctxMenu,         setCtxMenu]         = useState(null);  // { msg, x, y }
+  const [disappearTimer,  setDisappearTimer]  = useState(0);     // 0=off, seconds
+  const [showDisappearMenu, setShowDisappearMenu] = useState(false);
+  const [showReactions,   setShowReactions]   = useState(null);  // msg.id showing picker
 
   /* ── CALL TIMER LOGIC ── */
   const timerRef = useRef(null);
@@ -566,36 +579,140 @@ export default function ChatPage() {
     if (dirty) batch.commit().catch(console.error);
   }, [messages]);
 
+  // ★ Disappearing messages — auto-delete expired messages from UI
+  useEffect(() => {
+    if (!messages.length) return;
+    const now = Date.now();
+    messages.forEach(msg => {
+      if (msg.expiresAt) {
+        const expMs = msg.expiresAt?.toDate?.()?.getTime?.() || 0;
+        if (expMs > 0 && expMs <= now) {
+          deleteDoc(doc(db, 'messages', msg.id)).catch(() => {});
+        }
+      }
+    });
+  }, [messages]);
+
+  // ★ Register FCM token for push notifications (background/killed app)
+  useEffect(() => {
+    const registerFCM = async () => {
+      if (!PushNotifications || !socketRef.current) return;
+      try {
+        const perm = await PushNotifications.requestPermissions();
+        if (perm.receive !== 'granted') return;
+        await PushNotifications.register();
+        PushNotifications.addListener('registration', ({ value: token }) => {
+          socketRef.current?.emit('fcm-token', { role, token });
+        });
+        // When notification tapped while app is in background
+        PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+          const data = action.notification.data;
+          if (data?.type === 'call' && !activeRef.current) {
+            // App was opened from call notification — socket will deliver incoming-call
+          }
+        });
+      } catch (e) { console.warn('FCM setup:', e); }
+    };
+    // Delay slightly to ensure socket is connected
+    const t = setTimeout(registerFCM, 2000);
+    return () => clearTimeout(t);
+  }, [role]);
+
   /* ── MESSAGING ── */
   const sendMessage = async () => {
+    // Edit mode
+    if (editingMsg) {
+      const newText = text.trim();
+      if (newText && newText !== decryptData(editingMsg.text)) {
+        try {
+          await updateDoc(doc(db, 'messages', editingMsg.id), {
+            text: encryptData(newText), edited: true, editedAt: serverTimestamp()
+          });
+        } catch (e) { console.error(e); }
+      }
+      setEditingMsg(null);
+      setText('');
+      return;
+    }
     const t = text.trim(); if (!t) return;
-    // Clear typing indicator immediately on send
     clearTimeout(typingTimerRef.current);
     writeTyping(false);
     try {
-      await addDoc(collection(db, 'messages'), {
-        text: encryptData(t), sender: currentUser.email,
+      const msgData = {
+        text: encryptData(t),
+        sender: currentUser.email,
         participants: getParticipants(),
-        deletedFor: [], seenBy: [], timestamp: serverTimestamp()
-      });
+        deletedFor: [], seenBy: [],
+        timestamp: serverTimestamp(),
+        reactions: {}, starred: [],
+        edited: false, deletedForEveryone: false,
+      };
+      if (replyTo) {
+        msgData.replyTo = { id: replyTo.id, text: replyTo.text, sender: replyTo.sender };
+      }
+      if (disappearTimer > 0) {
+        const exp = new Date(Date.now() + disappearTimer * 1000);
+        msgData.expiresAt = Timestamp.fromDate(exp);
+      }
+      await addDoc(collection(db, 'messages'), msgData);
       setText('');
+      setReplyTo(null);
+      // FCM to offline partner
+      socketRef.current?.emit('message-sent', { toRole: partnerRole, preview: t.substring(0, 60) });
     } catch (e) { console.error(e); }
   };
 
   const deleteMsg = async msg => {
-    if (!window.confirm('Delete this message for YOU?')) return;
+    if (!window.confirm('Delete this message?')) return;
     try {
-      // Auto-Garbage Collection: If the other user already deleted it, and now we delete it, WIPE it permanently from Firebase!
-      if (msg.deletedFor && msg.deletedFor.length === 1 && !msg.deletedFor.includes(currentUser.email)) {
+      if (msg.deletedFor?.length === 1 && !msg.deletedFor.includes(currentUser.email)) {
         await deleteDoc(doc(db, 'messages', msg.id));
       } else {
         await updateDoc(doc(db, 'messages', msg.id), { deletedFor: arrayUnion(currentUser.email) });
       }
-    } catch (e) {
-      console.error("Delete failed: ", e);
-      alert('Could not delete old message due to strict Security rules.');
-    }
+    } catch (e) { console.error('Delete failed:', e); }
   };
+
+  // ★ Delete for everyone (Signal/WhatsApp style)
+  const deleteForEveryone = async msg => {
+    if (!window.confirm('Delete for everyone?')) return;
+    try {
+      await updateDoc(doc(db, 'messages', msg.id), {
+        deletedForEveryone: true,
+        text: encryptData('This message was deleted'),
+      });
+    } catch (e) { console.error(e); }
+  };
+
+  // ★ Emoji reaction
+  const reactToMessage = async (msg, emoji) => {
+    const reactions = { ...(msg.reactions || {}) };
+    const cur = reactions[emoji] || [];
+    if (cur.includes(role)) {
+      const updated = cur.filter(r => r !== role);
+      if (updated.length === 0) delete reactions[emoji];
+      else reactions[emoji] = updated;
+    } else {
+      reactions[emoji] = [...cur, role];
+    }
+    try { await updateDoc(doc(db, 'messages', msg.id), { reactions }); } catch (e) { console.error(e); }
+  };
+
+  // ★ Star/unstar
+  const toggleStar = async msg => {
+    const starred = msg.starred || [];
+    const next = starred.includes(role) ? starred.filter(r => r !== role) : [...starred, role];
+    try { await updateDoc(doc(db, 'messages', msg.id), { starred: next }); } catch (e) { console.error(e); }
+  };
+
+  // ★ Filtered messages for search
+  const visibleMessages = searchMode && searchQuery
+    ? messages.filter(m => {
+        if (m.isSystemEvent) return false;
+        try { return decryptData(m.text)?.toLowerCase().includes(searchQuery.toLowerCase()); }
+        catch { return false; }
+      })
+    : messages;
 
   const clearChat = async () => {
     if (!window.confirm('Clear entire chat history for yourself?')) return;
@@ -828,37 +945,18 @@ export default function ChatPage() {
       let label, icon, color;
 
       if (msg.event === 'missed') {
-        // caller sees "Not Answered", receiver sees "Missed Call"
-        if (isMe) {
-          label = `Not Answered ${cType} Call`;
-          icon  = 'fa-phone-slash';
-          color = '#ff9800'; // orange
-        } else {
-          label = `Missed ${cType} Call`;
-          icon  = 'fa-phone-missed';
-          color = '#ff4b4b'; // red
-        }
+        if (isMe) { label = `Not Answered ${cType} Call`; icon = 'fa-phone-slash'; color = '#ff9800'; }
+        else       { label = `Missed ${cType} Call`;       icon = 'fa-phone-missed'; color = '#ff4b4b'; }
       } else if (msg.event === 'not_answered') {
-        // auto-timeout (30s): same logic
-        if (isMe) {
-          label = `Not Answered ${cType} Call`;
-          icon  = 'fa-phone-slash';
-          color = '#ff9800';
-        } else {
-          label = `Missed ${cType} Call`;
-          icon  = 'fa-phone-missed';
-          color = '#ff4b4b';
-        }
+        if (isMe) { label = `Not Answered ${cType} Call`; icon = 'fa-phone-slash'; color = '#ff9800'; }
+        else       { label = `Missed ${cType} Call`;       icon = 'fa-phone-missed'; color = '#ff4b4b'; }
       } else if (msg.event === 'ended') {
-        label = `${cType} Call Ended`;
-        icon  = 'fa-phone';
-        color = '#78909c';
+        label = `${cType} Call Ended`; icon = 'fa-phone'; color = '#78909c';
       } else {
         label = `${cType} Call Started`;
         icon  = msg.callType === 'video' ? 'fa-video' : 'fa-phone-alt';
         color = '#4cd137';
       }
-
       return (
         <div key={msg.id} className="system-event-msg">
           <i className={`fas ${icon}`} style={{ color }} />
@@ -868,46 +966,56 @@ export default function ChatPage() {
       );
     }
 
+    // ★ Deleted for everyone
+    if (msg.deletedForEveryone) {
+      return (
+        <div key={msg.id} className={`message ${isMe ? 'sent' : 'received'}`}>
+          <div className="msg-body" style={{ opacity:0.55, fontStyle:'italic', fontSize:13 }}>
+            <i className="fas fa-ban" style={{ marginRight:5, color:'#8696a0' }} />
+            This message was deleted
+          </div>
+        </div>
+      );
+    }
+
+    // Long press → context menu (mobile)
+    let pressTimer = null;
+    const onTouchStart = (e) => {
+      const touch = e.touches[0];
+      pressTimer = setTimeout(() => setCtxMenu({ msg, x: touch.clientX, y: touch.clientY }), 500);
+    };
+    const onTouchEnd = () => clearTimeout(pressTimer);
+
     return (
       <div key={msg.id}
         className={`message ${isMe ? 'sent' : 'received'}`}
-        onMouseEnter={e => isMe && (e.currentTarget.querySelector('.del-btn').style.display = 'block')}
-        onMouseLeave={e => isMe && (e.currentTarget.querySelector('.del-btn').style.display = 'none')}
-        onClick={e => { if (isMe && e.target.className !== 'del-btn') { const b = e.currentTarget.querySelector('.del-btn'); if(b) b.style.display = b.style.display === 'none' ? 'block' : 'none'; } }}>
-        {isMe && (
-          <i className="fas fa-trash-alt del-btn"
-            onClick={() => deleteMsg(msg)}
-            style={{ position:'absolute', top:'-8px', right:'-8px', background:'rgba(255,65,108,0.9)', color:'white', padding:'6px', borderRadius:'50%', fontSize:'10px', cursor:'pointer', display:'none', zIndex:10 }} />
+        onContextMenu={(e) => { e.preventDefault(); setCtxMenu({ msg, x: e.clientX, y: e.clientY }); }}
+        onTouchStart={onTouchStart} onTouchEnd={onTouchEnd} onTouchMove={onTouchEnd}>
+
+        {/* ★ Reply quote */}
+        {msg.replyTo && (
+          <div style={{
+            background:'rgba(255,255,255,0.1)', borderLeft:'3px solid #25d366',
+            padding:'4px 8px', borderRadius:6, marginBottom:4, fontSize:12, maxWidth:'100%'
+          }}>
+            <span style={{ color:'#25d366', fontWeight:600, display:'block' }}>
+              {msg.replyTo.sender === currentUser.email ? 'You' : 'Partner'}
+            </span>
+            <span style={{ opacity:0.8 }}>
+              {(() => { try { return decryptData(msg.replyTo.text)?.substring(0,80); } catch { return '...'; } })()}
+            </span>
+          </div>
         )}
+
         <div className="msg-body">
           <span className="msg-footer">
+            {msg.starred?.includes(role) && <i className="fas fa-star" style={{ color:'#f4d03f', marginRight:4, fontSize:10 }} />}
             <span className="msg-time">{formatTime(msg.timestamp)}</span>
             {isMe && <TickIcon msg={msg} />}
           </span>
           {msg.imageUrl
-            ? <img 
-                src={msg.imageUrl} 
-                alt="" 
-                style={{ maxWidth:'100%', borderRadius:'6px', cursor:'pointer', display:'block' }} 
+            ? <img src={msg.imageUrl} alt="" style={{ maxWidth:'100%', borderRadius:'6px', cursor:'pointer', display:'block' }}
                 onClick={() => window.open(msg.imageUrl, '_blank')}
-                onError={e => { e.target.style.display = 'none'; }}
-                onContextMenu={async (e) => { 
-                     e.preventDefault(); 
-                     e.stopPropagation();
-                     if (!window.confirm('Save this image to your gallery?')) return;
-                     const fname = `GCapBank_${Date.now()}.jpg`;
-                     // Try native Android gallery save first
-                     const saved = await nativeSaveImage(msg.imageUrl, fname);
-                     if (saved) {
-                       alert('✅ Photo saved to Gallery!');
-                     } else {
-                       // Browser fallback (desktop/web)
-                       const a = document.createElement('a');
-                       a.href = msg.imageUrl;
-                       a.download = fname;
-                       a.click();
-                     }
-                }} 
               />
             : <span className="msg-text">{msg.text}</span>}
         </div>
@@ -943,7 +1051,21 @@ export default function ChatPage() {
               </div>
             </div>
           </div>
-          <div className="call-actions" style={{ display:'flex', alignItems:'center' }}>
+          <div className="call-actions" style={{ display:'flex', alignItems:'center', gap:4 }}>
+            {/* ★ Search */}
+            <button id="search-btn" title="Search Messages" onClick={() => { setSearchMode(s => !s); setSearchQuery(''); }}
+              style={{ color: searchMode ? '#00a884' : '#8696a0' }}>
+              <i className="fas fa-search" />
+            </button>
+            {/* ★ Disappearing timer */}
+            <button id="disappear-btn" title="Disappearing Messages"
+              onClick={() => setShowDisappearMenu(v => !v)}
+              style={{ color: disappearTimer > 0 ? '#f4d03f' : '#8696a0', position:'relative' }}>
+              <i className="fas fa-clock" />
+              {disappearTimer > 0 && (
+                <span style={{ position:'absolute', top:-4, right:-4, background:'#f4d03f', color:'#000', borderRadius:'50%', width:10, height:10, fontSize:7, display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700 }}>•</span>
+              )}
+            </button>
             <button id="clear-chat-btn" title="Clear Chat" onClick={clearChat} style={{ color:'#8696a0' }}><i className="fas fa-trash" /></button>
             <button id="audio-call-btn" title="Audio Call" onClick={() => initiateCall('audio')} style={{ color:'#00a884' }}><i className="fas fa-phone-alt" /></button>
             <button id="video-call-btn" title="Video Call" onClick={() => initiateCall('video')} style={{ color:'#00a884' }}><i className="fas fa-video" /></button>
@@ -951,23 +1073,95 @@ export default function ChatPage() {
           </div>
         </div>
 
-        <div className="chat-messages" id="chat-messages">
-          {messages.map(renderMessage)}
+        {/* ★ Search Bar */}
+        {searchMode && (
+          <div style={{ padding:'8px 12px', background:'#1f2c34', borderBottom:'1px solid rgba(255,255,255,0.08)', display:'flex', alignItems:'center', gap:8 }}>
+            <i className="fas fa-search" style={{ color:'#8696a0', fontSize:14 }} />
+            <input
+              autoFocus
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search messages..."
+              style={{ flex:1, background:'transparent', border:'none', outline:'none', color:'#e9edef', fontSize:15 }}
+            />
+            {searchQuery && (
+              <button onClick={() => setSearchQuery('')} style={{ background:'none', border:'none', color:'#8696a0', cursor:'pointer', padding:0 }}>
+                <i className="fas fa-times" />
+              </button>
+            )}
+            <span style={{ color:'#8696a0', fontSize:12 }}>
+              {searchMode && searchQuery ? `${visibleMessages.length} result${visibleMessages.length !== 1 ? 's' : ''}` : ''}
+            </span>
+          </div>
+        )}
+
+        {/* ★ Disappearing Timer Menu */}
+        {showDisappearMenu && (
+          <div style={{ position:'absolute', top:60, right:12, zIndex:1000, background:'#233138', borderRadius:10, boxShadow:'0 8px 32px rgba(0,0,0,0.4)', overflow:'hidden', minWidth:180 }}
+            onClick={() => setShowDisappearMenu(false)}>
+            {[
+              { label: 'Off', val: 0 },
+              { label: '30 seconds', val: 30 },
+              { label: '5 minutes', val: 300 },
+              { label: '1 hour', val: 3600 },
+              { label: '1 day', val: 86400 },
+              { label: '1 week', val: 604800 },
+            ].map(({ label, val }) => (
+              <div key={val}
+                onClick={() => setDisappearTimer(val)}
+                style={{ padding:'12px 16px', cursor:'pointer', display:'flex', alignItems:'center', gap:10,
+                  background: disappearTimer === val ? 'rgba(0,168,132,0.2)' : 'transparent',
+                  color: disappearTimer === val ? '#00a884' : '#e9edef', fontSize:14 }}>
+                <i className="fas fa-clock" style={{ width:16, color: disappearTimer === val ? '#00a884' : '#8696a0' }} />
+                {label}
+                {disappearTimer === val && <i className="fas fa-check" style={{ marginLeft:'auto', color:'#00a884' }} />}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="chat-messages" id="chat-messages" onClick={() => { setCtxMenu(null); setShowReactions(null); }}>
+          {visibleMessages.map(renderMessage)}
           <div ref={msgEnd} />
         </div>
 
-        <div className="chat-input-area">
-          {/* Gallery Input */}
-          <input type="file" ref={galleryInput} accept="image/*" style={{ display:'none' }}
-            onChange={e => { if (e.target.files[0]) compressAndSend(e.target.files[0]); e.target.value = ''; }} />
-          
-          <button id="camera-btn"  title="Camera"  onClick={openCamera}><i className="fas fa-camera" /></button>
-          <button id="gallery-btn" title="Gallery"  onClick={() => galleryInput.current?.click()}><i className="fas fa-image" /></button>
-          <input type="text" id="message-input" placeholder="Type a message"
-            value={text}
-            onChange={e => handleTypingInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && sendMessage()} />
-          <button id="send-btn" onClick={sendMessage}><i className="fas fa-paper-plane" /></button>
+        <div className="chat-input-area" style={{ flexDirection:'column', padding:0 }}>
+          {/* ★ Reply preview strip */}
+          {replyTo && (
+            <div style={{ display:'flex', alignItems:'center', padding:'6px 12px', background:'rgba(0,168,132,0.12)', borderTop:'2px solid #00a884', gap:8 }}>
+              <div style={{ flex:1 }}>
+                <span style={{ color:'#00a884', fontSize:12, fontWeight:600, display:'block' }}>Replying to {replyTo.sender === currentUser?.email ? 'yourself' : 'Partner'}</span>
+                <span style={{ color:'#8696a0', fontSize:12 }}>
+                  {(() => { try { return decryptData(replyTo.text)?.substring(0, 60); } catch { return '...'; } })()}
+                </span>
+              </div>
+              <button onClick={() => setReplyTo(null)} style={{ background:'none', border:'none', color:'#8696a0', cursor:'pointer', padding:4 }}><i className="fas fa-times" /></button>
+            </div>
+          )}
+
+          {/* ★ Edit mode indicator */}
+          {editingMsg && (
+            <div style={{ display:'flex', alignItems:'center', padding:'6px 12px', background:'rgba(244,211,63,0.12)', borderTop:'2px solid #f4d33f', gap:8 }}>
+              <i className="fas fa-pencil-alt" style={{ color:'#f4d33f', fontSize:12 }} />
+              <span style={{ flex:1, color:'#f4d33f', fontSize:12, fontWeight:600 }}>Editing message</span>
+              <button onClick={() => { setEditingMsg(null); setText(''); }} style={{ background:'none', border:'none', color:'#8696a0', cursor:'pointer', padding:4 }}><i className="fas fa-times" /></button>
+            </div>
+          )}
+
+          {/* Input row */}
+          <div style={{ display:'flex', alignItems:'center', padding:'8px 12px', gap:8, width:'100%' }}>
+            {/* Gallery Input */}
+            <input type="file" ref={galleryInput} accept="image/*" style={{ display:'none' }}
+              onChange={e => { if (e.target.files[0]) compressAndSend(e.target.files[0]); e.target.value = ''; }} />
+            <button id="camera-btn"  title="Camera"  onClick={openCamera}><i className="fas fa-camera" /></button>
+            <button id="gallery-btn" title="Gallery" onClick={() => galleryInput.current?.click()}><i className="fas fa-image" /></button>
+            <input type="text" id="message-input"
+              placeholder={editingMsg ? 'Edit message...' : 'Type a message'}
+              value={text}
+              onChange={e => handleTypingInput(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && sendMessage()} />
+            <button id="send-btn" onClick={sendMessage}><i className="fas fa-paper-plane" /></button>
+          </div>
         </div>
       </div>
 
@@ -1179,6 +1373,64 @@ export default function ChatPage() {
           <canvas ref={camCanvas} style={{ display:'none' }} />
         </div>
       )}
+
+      {/* ★ CONTEXT MENU — long press / right click on message */}
+      {ctxMenu && (
+        <div
+          onClick={() => setCtxMenu(null)}
+          style={{ position:'fixed', inset:0, zIndex:5000, background:'rgba(0,0,0,0.4)' }}>
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              position:'fixed',
+              left: Math.min(ctxMenu.x, window.innerWidth - 200),
+              top:  Math.min(ctxMenu.y, window.innerHeight - 340),
+              background:'#233138', borderRadius:12,
+              boxShadow:'0 8px 32px rgba(0,0,0,0.5)',
+              overflow:'hidden', minWidth:190, zIndex:5001
+            }}>
+
+            {/* Emoji reaction quick-pick */}
+            <div style={{ display:'flex', justifyContent:'space-around', padding:'10px 8px', borderBottom:'1px solid rgba(255,255,255,0.08)' }}>
+              {['❤️','😂','😮','😢','🙏','👍'].map(emoji => (
+                <span key={emoji}
+                  onClick={() => { reactToMessage(ctxMenu.msg, emoji); setCtxMenu(null); }}
+                  style={{ fontSize:22, cursor:'pointer', padding:4, borderRadius:8,
+                    background: ctxMenu.msg.reactions?.[emoji]?.includes(role) ? 'rgba(37,211,102,0.2)' : 'transparent',
+                    transition:'background 0.15s' }}>
+                  {emoji}
+                </span>
+              ))}
+            </div>
+
+            {/* Actions */}
+            {[
+              { icon:'fa-reply',          label:'Reply',               action: () => { setReplyTo(ctxMenu.msg); setCtxMenu(null); } },
+              ...(ctxMenu.msg.sender === currentUser?.email ? [
+                { icon:'fa-pencil-alt',   label:'Edit',                action: () => { setEditingMsg(ctxMenu.msg); setText((() => { try { return decryptData(ctxMenu.msg.text); } catch { return ''; } })()); setCtxMenu(null); } },
+              ] : []),
+              { icon:'fa-star',           label: ctxMenu.msg.starred?.includes(role) ? 'Unstar' : 'Star', action: () => { toggleStar(ctxMenu.msg); setCtxMenu(null); } },
+              { icon:'fa-copy',           label:'Copy',                action: () => { try { navigator.clipboard.writeText(decryptData(ctxMenu.msg.text)); } catch {} setCtxMenu(null); } },
+              { icon:'fa-trash-alt',      label:'Delete for me',       action: () => { deleteMsg(ctxMenu.msg); setCtxMenu(null); }, color:'#ff6b6b' },
+              ...(ctxMenu.msg.sender === currentUser?.email ? [
+                { icon:'fa-ban',          label:'Delete for everyone', action: () => { deleteForEveryone(ctxMenu.msg); setCtxMenu(null); }, color:'#ff4b4b' },
+              ] : []),
+            ].map(({ icon, label, action, color }) => (
+              <div key={label} onClick={action} style={{
+                padding:'13px 16px', cursor:'pointer', display:'flex', alignItems:'center', gap:12,
+                color: color || '#e9edef', fontSize:14,
+                borderBottom:'1px solid rgba(255,255,255,0.05)'
+              }}
+                onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.06)'}
+                onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                <i className={`fas ${icon}`} style={{ width:16, color: color || '#8696a0' }} />
+                {label}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
